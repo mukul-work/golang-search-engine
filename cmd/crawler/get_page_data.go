@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func getPageData(url string) (string, string, int, error) {
+func GetPageData(url string) (string, string, int, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("failed to fetch URL: %w", err)
