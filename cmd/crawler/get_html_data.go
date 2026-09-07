@@ -11,8 +11,11 @@ var links []string
 func traverseNodes(node *html.Node) {
 	if node.Type == html.ElementNode && node.Data == "a" {
 		for _, attr := range node.Attr {
-			links = append(links, attr.Val)
-			break
+			if attr.Key == "href" {
+
+				links = append(links, attr.Val)
+				break
+			}
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
