@@ -15,6 +15,10 @@ func NewFrontier() *Frontier {
 	return f
 }
 
+func (f *Frontier) push(url string) {
+	f.in <- url
+}
+
 func (f *Frontier) run() {
 	var queue []string
 	for {
