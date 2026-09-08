@@ -14,6 +14,10 @@ func NewVisitedSet() *VisitedSet {
 	}
 }
 
+func (v *VisitedSet) Count() int {
+	return len(v.visited)
+}
+
 func (v *VisitedSet) IsVisited(url string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
