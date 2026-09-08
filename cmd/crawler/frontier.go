@@ -19,6 +19,10 @@ func (f *Frontier) Push(url string) {
 	f.in <- url
 }
 
+func (f *Frontier) Close() {
+	close(f.out)
+}
+
 func (f *Frontier) run() {
 	var queue []string
 	for {
