@@ -15,7 +15,7 @@ func NewFrontier() *Frontier {
 	return f
 }
 
-func (f *Frontier) push(url string) {
+func (f *Frontier) Push(url string) {
 	f.in <- url
 }
 

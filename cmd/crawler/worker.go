@@ -33,7 +33,7 @@ func Worker(f *Frontier, wg *sync.WaitGroup, v *VisitedSet) {
 		for _, link := range links {
 			if !v.IsVisited(link) { // check for already visited URL
 				wg.Add(1)
-				f.push(link)
+				f.Push(link)
 			}
 		}
 		fmt.Printf("Visited URL: %s", url)
