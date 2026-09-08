@@ -41,7 +41,7 @@ func main() {
 	}
 	seeds := []string{
 		"https://example.com",
-		"https://example2.com",
+		"https://scrapfly.io/blog/posts/best-websites-to-practice-web-scraping",
 	}
 
 	for _, seed := range seeds {
