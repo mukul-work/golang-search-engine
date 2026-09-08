@@ -28,6 +28,9 @@ func Worker(f *Frontier, wg *sync.WaitGroup, v *VisitedSet) {
 		links, err := fetchUrl(url)
 		if err != nil {
 			log.Fatalf("Problem with fetching or parsing the URL: %v", err)
+			wg.Done()
+			continue
+
 		}
 
 		for _, link := range links {
