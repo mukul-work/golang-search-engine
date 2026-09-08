@@ -23,7 +23,7 @@ func fetchUrl(url string) ([]string, error) {
 
 }
 
-func worker(f *Frontier, wg *sync.WaitGroup, v *VisitedSet) {
+func Worker(f *Frontier, wg *sync.WaitGroup, v *VisitedSet) {
 	for url := range f.out {
 		links, err := fetchUrl(url)
 		if err != nil {
