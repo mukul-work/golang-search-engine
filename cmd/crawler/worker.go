@@ -15,7 +15,7 @@ func fetchUrl(url string) ([]string, error) {
 	fmt.Printf("Content Type: %s\n", contentType)
 	fmt.Printf("Status Code: %d\n", statusCode)
 
-	links, err := GetHTMLData(htmlBody)
+	links, err := GetHTMLData(htmlBody, url)
 	if err != nil {
 		return nil, fmt.Errorf("Problem while parsing the HTML: %w", err)
 	}
