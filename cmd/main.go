@@ -37,7 +37,7 @@ func main() {
 
 	numWorkers := 10
 	for i := 0; i < numWorkers; i++ {
-		go crawler.Worker(f, &wg, visited)
+		go crawler.Worker(i, f, &wg, visited)
 	}
 	seeds := []string{
 		"https://example.com",
