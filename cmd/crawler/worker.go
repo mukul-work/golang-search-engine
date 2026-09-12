@@ -24,8 +24,21 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 
 }
 
-func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet) {
+func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache) {
 	for url := range f.out {
+		Allowed, err := rc.Allowed(url)
+		if err != nil {
+			fmt.Printf("Worker: %d Error while wroking with robots.txt: %v", workerNum, err)
+			wg.Done()
+			continue
+		}
+
+		if !Allowed {
+			fmt.Printf("Worker: %d Skipping (robots.txt disallows): %s\n", workerNum, url)
+			wg.Done()
+			continue
+		}
+
 		links, err := fetchUrl(url, workerNum)
 		if err != nil {
 			log.Printf("Worker: %d Problem with fetching or parsing the URL: %v\n", workerNum, err)
