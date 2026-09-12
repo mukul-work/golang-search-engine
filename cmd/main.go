@@ -33,11 +33,12 @@ func main() {
 
 	f := crawler.NewFrontier()
 	visited := crawler.NewVisitedSet()
+	rc := crawler.NewRobotCache()
 	var wg sync.WaitGroup
 
 	numWorkers := 10
 	for i := 0; i < numWorkers; i++ {
-		go crawler.Worker(i, f, &wg, visited)
+		go crawler.Worker(i, f, &wg, visited, rc)
 	}
 	seeds := []string{
 		"https://example.com",
