@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"net/http"
 	"net/url"
 	"sync"
 
@@ -21,18 +22,45 @@ func NewRobotCache() *RobotCache {
 	}
 }
 
+func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if data, ok := rc.cache[host]; ok {
+		return data, nil
+	}
+	req, err := http.NewRequest("GET", "https://"+host+"/robots.txt", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("user-Agent", userAgent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	data, err := robotstxt.FromResponse(resp)
+	if err != nil {
+		return nil, err
+	}
+	rc.cache[host] = data
+	return data, nil
+}
+
 func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
 	url, err := url.Parse(rawUrl)
 	if err != nil {
 		return false, err
 	}
 
-	data := rc.Get(url.Host)
+	data, err := rc.Get(url.Host)
+	if err != nil {
+		return false, err
+	}
 	group := data.FindGroup(userAgent)
 
 	path := url.Path
 	if url.RawQuery != "" {
 		path += "?" + url.RawQuery
 	}
-	return group.Test(path)
+	return group.Test(path), nil
 }
