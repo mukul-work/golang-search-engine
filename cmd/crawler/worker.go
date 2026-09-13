@@ -24,7 +24,7 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 
 }
 
-func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache) {
+func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache, hl *HostLimiter) {
 	for url := range f.out {
 		Allowed, err := rc.Allowed(url)
 		if err != nil {
@@ -38,7 +38,11 @@ func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *R
 			wg.Done()
 			continue
 		}
-
+		if err := hl.Wait(url); err != nil { // <-- rate limit, blocks per host
+			fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
+			wg.Done()
+			continue
+		}
 		links, err := fetchUrl(url, workerNum)
 		if err != nil {
 			log.Printf("Worker: %d Problem with fetching or parsing the URL: %v\n", workerNum, err)
