@@ -7,4 +7,5 @@ require (
 	github.com/andybalholm/cascadia v1.3.4 // indirect
 	github.com/temoto/robotstxt v1.1.2 // indirect
 	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 )
