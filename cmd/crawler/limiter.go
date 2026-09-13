@@ -2,6 +2,7 @@ package crawler
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -38,5 +39,12 @@ func (hl *HostLimiter) Wait(rawURL string) error {
 		return err
 	}
 	lim := hl.getLimiter(u.Host)
-	return lim.Wait(context.Background())
+	start := time.Now()
+	err = lim.Wait(context.Background())
+	elapsed := time.Since(start)
+
+	if elapsed > 10*time.Millisecond { // only log if it actually waited
+		fmt.Printf("[RateLimiter] Waited %v for host: %s\n", elapsed, u.Host)
+	}
+	return err
 }
