@@ -71,3 +71,30 @@ func GetPageText(htmlString string) (string, error) {
 	extractText(&sb, doc)
 	return sb.String(), nil
 }
+
+func extractTitle(node *html.Node, title *string, found *bool) {
+	if *found {
+		return // stop traversing entirely once found
+	}
+	if node.Type == html.ElementNode && node.Data == "title" {
+		if node.FirstChild != nil && node.FirstChild.Type == html.TextNode {
+			*title = strings.TrimSpace(node.FirstChild.Data)
+			*found = true
+		}
+		return
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		extractTitle(child, title, found)
+	}
+}
+
+func GetPageTitle(htmlString string) (string, error) {
+	doc, err := html.Parse(strings.NewReader(htmlString))
+	if err != nil {
+		return "", err
+	}
+	var title string
+	found := false
+	extractTitle(doc, &title, &found)
+	return title, nil
+}
