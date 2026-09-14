@@ -41,5 +41,33 @@ func GetHTMLData(htmlString string, baseUrl string) ([]string, error) {
 	}
 	traverseNodes(doc, base, &links)
 	return links, err
+}
 
+func extractText(sb *strings.Builder, node *html.Node) {
+	if node.Type == html.ElementNode {
+		switch node.Data {
+		case "script", "style", "noscript":
+			return
+		}
+	}
+	if node.Type == html.TextNode {
+		text := strings.TrimSpace(node.Data)
+		if text != "" {
+			sb.WriteString(text)
+			sb.WriteString("")
+		}
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		extractText(sb, child)
+	}
+}
+
+func GetPageText(htmlString string) (string, error) {
+	doc, err := html.Parse(strings.NewReader(htmlString))
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	extractText(&sb, doc)
+	return sb.String(), nil
 }
