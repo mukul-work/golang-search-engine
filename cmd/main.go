@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
+	"os"
 	"sync"
 
+	"github.com/joho/godotenv"
 	"github.com/mukul-work/golang-web-crawler/crawler"
+	"github.com/mukul-work/golang-web-crawler/db"
 )
 
 // type Urls struct {
@@ -30,6 +35,20 @@ import (
 // }
 
 func main() {
+	// load environment variables
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// create a db pool
+	dbURL := os.Getenv("DB_URL")
+	ctx := context.Background()
+	err = db.Connect(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Pool.Close()
 
 	f := crawler.NewFrontier()
 	visited := crawler.NewVisitedSet()
