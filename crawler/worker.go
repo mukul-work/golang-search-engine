@@ -35,7 +35,12 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 	for _, c := range wordCounts {
 		total += c
 	}
-	pageID, err := db.InsertPage(context.Background(), url, "", text, total)
+	title, err := GetPageTitle(htmlBody)
+	if err != nil {
+		return nil, fmt.Errorf("Problem extracting title: %w", err)
+	}
+
+	pageID, err := db.InsertPage(context.Background(), url, title, text, total)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to insert page: %w", err)
 	}
