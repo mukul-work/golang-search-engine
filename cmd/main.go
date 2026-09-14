@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/mukul-work/golang-web-crawler/cmd/crawler"
+	"github.com/mukul-work/golang-web-crawler/crawler"
 )
 
 // type Urls struct {
