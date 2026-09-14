@@ -1,9 +1,13 @@
 package crawler
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"sync"
+
+	"github.com/mukul-work/golang-web-crawler/db"
+	"github.com/mukul-work/golang-web-crawler/indexer"
 )
 
 func fetchUrl(url string, workerNum int) ([]string, error) {
@@ -20,6 +24,22 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Problem while parsing the HTML: %w", err)
 	}
+	text, err := GetPageText(htmlBody)
+	if err != nil {
+		return nil, fmt.Errorf("Problem extracting text: %w", err)
+	}
+
+	wordCounts := indexer.Tokenize(text)
+
+	pageID, err := db.InsertPage(context.Background(), url, "", text, len(wordCounts))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to insert page: %w", err)
+	}
+
+	if err := db.InsertWordEntries(context.Background(), pageID, wordCounts); err != nil {
+		return nil, fmt.Errorf("Failed to insert word entries: %w", err)
+	}
+
 	return links, err
 
 }
