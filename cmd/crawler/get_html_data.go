@@ -7,9 +7,9 @@ import (
 	"golang.org/x/net/html"
 )
 
-var links []string
+// var links []string --> this should not be global
 
-func traverseNodes(node *html.Node, base *url.URL) {
+func traverseNodes(node *html.Node, base *url.URL, links []string) {
 	if node.Type == html.ElementNode && node.Data == "a" {
 		for _, attr := range node.Attr {
 			if attr.Key == "href" {
@@ -25,11 +25,12 @@ func traverseNodes(node *html.Node, base *url.URL) {
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		traverseNodes(child, base)
+		traverseNodes(child, base, links)
 	}
 }
 
 func GetHTMLData(htmlString string, baseUrl string) ([]string, error) {
+	var links []string
 	doc, err := html.Parse(strings.NewReader(htmlString))
 	if err != nil {
 		return nil, err
@@ -38,7 +39,7 @@ func GetHTMLData(htmlString string, baseUrl string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	traverseNodes(doc, base)
+	traverseNodes(doc, base, links)
 	return links, err
 
 }
