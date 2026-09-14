@@ -24,14 +24,18 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Problem while parsing the HTML: %w", err)
 	}
+
 	text, err := GetPageText(htmlBody)
 	if err != nil {
 		return nil, fmt.Errorf("Problem extracting text: %w", err)
 	}
 
 	wordCounts := indexer.Tokenize(text)
-
-	pageID, err := db.InsertPage(context.Background(), url, "", text, len(wordCounts))
+	total := 0
+	for _, c := range wordCounts {
+		total += c
+	}
+	pageID, err := db.InsertPage(context.Background(), url, "", text, total)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to insert page: %w", err)
 	}
