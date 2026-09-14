@@ -9,7 +9,7 @@ import (
 
 // var links []string --> this should not be global
 
-func traverseNodes(node *html.Node, base *url.URL, links []string) {
+func traverseNodes(node *html.Node, base *url.URL, links *[]string) {
 	if node.Type == html.ElementNode && node.Data == "a" {
 		for _, attr := range node.Attr {
 			if attr.Key == "href" {
@@ -19,7 +19,7 @@ func traverseNodes(node *html.Node, base *url.URL, links []string) {
 					continue // ignore the malformed URL -> gotta fix this later
 				}
 				resolved := base.ResolveReference(ref).String()
-				links = append(links, resolved)
+				*links = append(*links, resolved)
 				break
 			}
 		}
@@ -39,7 +39,7 @@ func GetHTMLData(htmlString string, baseUrl string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	traverseNodes(doc, base, links)
+	traverseNodes(doc, base, &links)
 	return links, err
 
 }
