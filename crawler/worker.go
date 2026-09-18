@@ -57,7 +57,7 @@ func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *R
 	for url := range f.out {
 		Allowed, err := rc.Allowed(url)
 		if err != nil {
-			fmt.Printf("Worker: %d Error while wroking with robots.txt: %v", workerNum, err)
+			fmt.Printf("Worker: %d Error while working with robots.txt: %v", workerNum, err)
 			wg.Done()
 			continue
 		}
@@ -74,7 +74,7 @@ func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *R
 		}
 		links, err := fetchUrl(url, workerNum)
 		if err != nil {
-			log.Printf("Worker: %d Problem with fetching or parsing the URL: %v\n", workerNum, err)
+			log.Printf("Worker: %d %v\n", workerNum, err)
 			wg.Done()
 			continue
 
