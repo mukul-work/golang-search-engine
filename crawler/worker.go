@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/mukul-work/golang-web-crawler/db"
 	"github.com/mukul-work/golang-web-crawler/indexer"
+	"golang.org/x/net/html"
 )
 
 func fetchUrl(url string, workerNum int) ([]string, error) {
@@ -20,12 +22,17 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 	fmt.Printf("Worker: %d Content Type: %s\n", workerNum, contentType)
 	fmt.Printf("Worker: %d Status Code: %d\n", workerNum, statusCode)
 
-	links, err := GetHTMLData(htmlBody, url)
+	doc, err := html.Parse(strings.NewReader(htmlBody))
+	if err != nil {
+		return nil, fmt.Errorf("Problem while parsing the HTML before passing it into the GetHTMLData: %w", err)
+	}
+
+	links, err := GetHTMLData(doc, url)
 	if err != nil {
 		return nil, fmt.Errorf("Problem while parsing the HTML: %w", err)
 	}
 
-	text, err := GetPageText(htmlBody)
+	text, err := GetPageText(doc)
 	if err != nil {
 		return nil, fmt.Errorf("Problem extracting text: %w", err)
 	}
@@ -35,7 +42,7 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 	for _, c := range wordCounts {
 		total += c
 	}
-	title, err := GetPageTitle(htmlBody)
+	title, err := GetPageTitle(doc)
 	if err != nil {
 		return nil, fmt.Errorf("Problem extracting title: %w", err)
 	}
