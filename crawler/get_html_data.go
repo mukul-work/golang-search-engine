@@ -29,17 +29,17 @@ func traverseNodes(node *html.Node, base *url.URL, links *[]string) {
 	}
 }
 
-func GetHTMLData(htmlString string, baseUrl string) ([]string, error) {
+func GetHTMLData(node *html.Node, baseUrl string) ([]string, error) {
 	var links []string
-	doc, err := html.Parse(strings.NewReader(htmlString))
-	if err != nil {
-		return nil, err
-	}
+	// doc, err := html.Parse(strings.NewReader(htmlString))
+	// if err != nil {
+	// 	return nil, err
+	// }
 	base, err := url.Parse(baseUrl)
 	if err != nil {
 		return nil, err
 	}
-	traverseNodes(doc, base, &links)
+	traverseNodes(node, base, &links)
 	return links, err
 }
 
@@ -62,13 +62,13 @@ func extractText(sb *strings.Builder, node *html.Node) {
 	}
 }
 
-func GetPageText(htmlString string) (string, error) {
-	doc, err := html.Parse(strings.NewReader(htmlString))
-	if err != nil {
-		return "", err
-	}
+func GetPageText(node *html.Node) (string, error) {
+	// doc, err := html.Parse(strings.NewReader(htmlString))
+	// if err != nil {
+	// 	return "", err
+	// }
 	var sb strings.Builder
-	extractText(&sb, doc)
+	extractText(&sb, node)
 	return sb.String(), nil
 }
 
@@ -88,13 +88,13 @@ func extractTitle(node *html.Node, title *string, found *bool) {
 	}
 }
 
-func GetPageTitle(htmlString string) (string, error) {
-	doc, err := html.Parse(strings.NewReader(htmlString))
-	if err != nil {
-		return "", err
-	}
+func GetPageTitle(node *html.Node) (string, error) {
+	// doc, err := html.Parse(strings.NewReader(htmlString))
+	// if err != nil {
+	// 	return "", err
+	// }
 	var title string
 	found := false
-	extractTitle(doc, &title, &found)
+	extractTitle(node, &title, &found)
 	return title, nil
 }
