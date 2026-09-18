@@ -10,9 +10,9 @@ func InsertWordEntries(ctx context.Context, pageID int, wordCounts map[string]in
 	batch := &pgx.Batch{}
 	for word, count := range wordCounts {
 		batch.Queue(
-			`INSERT INTO inverted_index (word, page_id, frequency)
+			`INSERT INTO inverted_index (word, page_id, freq)
 			 VALUES ($1, $2, $3)
-			 ON CONFLICT (word, page_id) DO UPDATE SET frequency = EXCLUDED.frequency`,
+			 ON CONFLICT (word, page_id) DO UPDATE SET freq = EXCLUDED.freq`,
 			word, pageID, count,
 		)
 	}
