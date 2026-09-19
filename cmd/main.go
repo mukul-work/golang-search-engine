@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/joho/godotenv"
-	"github.com/mukul-work/golang-web-crawler/crawler"
-	"github.com/mukul-work/golang-web-crawler/db"
+	"github.com/mukul-work/golang-search-engine/crawler"
+	"github.com/mukul-work/golang-search-engine/db"
 )
 
 // type Urls struct {
