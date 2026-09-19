@@ -1,4 +1,4 @@
-module github.com/mukul-work/golang-web-crawler
+module github.com/mukul-work/golang-search-engine
 
 go 1.26.5
 
