@@ -4,9 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
+	"github.com/joho/godotenv"
+	"github.com/mukul-work/golang-search-engine/db"
 	"github.com/mukul-work/golang-search-engine/search"
 )
 
@@ -19,6 +22,21 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: search [-n 10] <query>")
 		os.Exit(1)
 	}
+
+	// load environment variables
+	err := godotenv.Load(".env.local")
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
+
+	// create a db pool
+	dbURL := os.Getenv("DB_URL")
+	ctx := context.Background()
+	err = db.Connect(ctx, dbURL)
+	if err != nil {
+		log.Fatalf("failed to connect to db: %v", err)
+	}
+	defer db.Pool.Close()
 
 	results, err := search.Query(context.Background(), q, *limit)
 	if err != nil {
