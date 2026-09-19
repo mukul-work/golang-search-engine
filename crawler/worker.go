@@ -53,16 +53,20 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 		return nil, fmt.Errorf("Problem extracting title: %w", err)
 	}
 
-	pageID, err := db.InsertPage(context.Background(), url, title, text, total)
-	if err != nil {
-		return nil, fmt.Errorf("Failed to insert page: %w", err)
+	if err := db.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
+		return nil, fmt.Errorf("Failed to insert into the database: %w", err)
 	}
 
-	if err := db.InsertWordEntries(context.Background(), pageID, wordCounts); err != nil {
-		return nil, fmt.Errorf("Failed to insert word entries: %w", err)
-	}
+	// pageID, err := db.InsertPage(context.Background(), url, title, text, total)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("Failed to insert page: %w", err)
+	// }
 
-	return links, err
+	// if err := db.InsertWordEntries(context.Background(), pageID, wordCounts); err != nil {
+	// 	return nil, fmt.Errorf("Failed to insert word entries: %w", err)
+	// }
+
+	return links, nil
 
 }
 
