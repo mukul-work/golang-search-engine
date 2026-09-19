@@ -7,6 +7,7 @@ import (
 
 var wordRe = regexp.MustCompile(`[a-zA-Z]+`) // currently it accepts ASCII codes only. I'll add the support for other codes later
 
+// will implement NLP later on
 var stopwords = map[string]struct{}{
 	"i": {}, "me": {}, "my": {}, "myself": {}, "we": {}, "our": {}, "ours": {},
 	"ourselves": {}, "you": {}, "your": {}, "yours": {}, "yourself": {}, "yourselves": {},

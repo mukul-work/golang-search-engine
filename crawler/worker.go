@@ -18,6 +18,12 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 		err = fmt.Errorf("Error while fetching the page data for '%s': %v\n", url, err)
 		return nil, err
 	}
+
+	if !strings.HasPrefix(strings.ToLower(contentType), "text/html") {
+		fmt.Printf("Worker: %d Skipping non-HTML (%s): %s\n", workerNum, contentType, url)
+		return nil, nil
+	}
+
 	fmt.Printf("Worker: %d Trying to visit: %s\n", workerNum, url)
 	fmt.Printf("Worker: %d Content Type: %s\n", workerNum, contentType)
 	fmt.Printf("Worker: %d Status Code: %d\n", workerNum, statusCode)
