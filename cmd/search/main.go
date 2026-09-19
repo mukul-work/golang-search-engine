@@ -43,7 +43,9 @@ func main() {
 		fmt.Fprintln(os.Stderr, "search failed:", err)
 		os.Exit(1)
 	}
-
+	if len(results) == 0 {
+		fmt.Print("Empty result set\n")
+	}
 	for i, r := range results {
 		fmt.Printf("%d. %s\n   %s\n   %s\n   %f\n\n", i+1, r.Title, r.URL, r.Snippet, r.Score)
 	}
