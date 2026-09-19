@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/mukul-work/golang-search-engine/db"
 	"github.com/mukul-work/golang-search-engine/indexer"
@@ -15,11 +16,12 @@ func Query(ctx context.Context, q string, limit int) ([]models.Result, error) {
 	if len(countsOfWords) == 0 {
 		return nil, nil
 	}
+	fmt.Printf("countOfWords: %d", len(countsOfWords))
 	terms := make([]string, 0, len(countsOfWords))
-	for _, term := range terms {
+	for term := range countsOfWords {
 		terms = append(terms, term)
 	}
-
+	// fmt.Printf("terms=%q count=%d\n", terms, len(terms))
 	rows, err := db.Pool.Query(ctx, query, terms, len(terms), limit)
 	if err != nil {
 		return nil, err
