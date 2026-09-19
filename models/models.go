@@ -20,3 +20,10 @@ type WordEntry struct {
 	PageID    int
 	Frequency int
 }
+
+type Result struct {
+	Title   string
+	URL     string
+	Snippet string // first 200 characters of the page text
+	Score   float64
+}
