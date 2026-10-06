@@ -8,11 +8,14 @@ import (
 	"github.com/mukul-work/golang-search-engine/models"
 )
 
-const query = `WITH n AS (
-    SELECT COUNT(*)::float8 AS total FROM pages WHERE total_words > 0         -- N
+const query = `
+WITH stats AS (
+    SELECT COUNT(*)::float8 AS n, AVG(total_words)::float8 AS avgdl
+    FROM pages
+    WHERE total_words > 0
 ),
 df AS (
-    SELECT word, COUNT(*)::float8 AS df                  -- df per query term
+    SELECT word, COUNT(*)::float8 AS doc_freq
     FROM inverted_index
     WHERE word = ANY($1)
     GROUP BY word
@@ -20,18 +23,21 @@ df AS (
 SELECT COALESCE(p.title, ''),
        p.url,
        COALESCE(LEFT(p.content, 200), ''),
-       SUM( (i.freq::float8 / p.total_words)             -- TF
-            * LN(1 + n.total / df.df) ) AS score         -- × IDF
+       SUM(
+         LN(1 + (stats.n - df.doc_freq + 0.5) / (df.doc_freq + 0.5))            -- IDF
+         * (i.freq::float8 * (1.2 + 1))                                          -- freq * (k1+1)
+         / (i.freq + 1.2 * (1 - 0.75 + 0.75 * p.total_words / stats.avgdl))      -- freq + k1*(1-b+b*|d|/avgdl)
+       ) AS score
 FROM inverted_index i
-JOIN pages p  ON p.id = i.page_id
-JOIN df       ON df.word = i.word
-CROSS JOIN n
+JOIN pages p ON p.id = i.page_id
+JOIN df ON df.word = i.word
+CROSS JOIN stats
 WHERE i.word = ANY($1)
   AND p.total_words > 0
 GROUP BY p.id
-HAVING COUNT(*) = $2::int                                     -- page must contain ALL terms
+HAVING COUNT(*) = $2
 ORDER BY score DESC
-LIMIT $3::int`
+LIMIT $3`
 
 func Query(ctx context.Context, q string, limit int) ([]models.Result, error) {
 	countsOfWords := indexer.Tokenize(q) // q = web-crawler/search-engine  web 1, crawler 1 search 1 engine 1
