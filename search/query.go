@@ -9,7 +9,7 @@ import (
 )
 
 const query = `WITH n AS (
-    SELECT COUNT(*)::float8 AS total FROM pages          -- N
+    SELECT COUNT(*)::float8 AS total FROM pages WHERE total_words > 0         -- N
 ),
 df AS (
     SELECT word, COUNT(*)::float8 AS df                  -- df per query term
@@ -29,9 +29,9 @@ CROSS JOIN n
 WHERE i.word = ANY($1)
   AND p.total_words > 0
 GROUP BY p.id
-HAVING COUNT(*) = $2                                     -- page must contain ALL terms
+HAVING COUNT(*) = $2::int                                     -- page must contain ALL terms
 ORDER BY score DESC
-LIMIT $3`
+LIMIT $3::int`
 
 func Query(ctx context.Context, q string, limit int) ([]models.Result, error) {
 	countsOfWords := indexer.Tokenize(q) // q = web-crawler/search-engine  web 1, crawler 1 search 1 engine 1
