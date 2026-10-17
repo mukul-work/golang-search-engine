@@ -23,8 +23,9 @@ type RobotCache struct {
 }
 
 const (
-	userAgent   = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
-	robotsToken = "WebCrawler"
+	userAgent     = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
+	robotsToken   = "WebCrawler"
+	maxRobotsSize = 512 << 10 // 512 KiB
 )
 
 func NewRobotCache() *RobotCache {
@@ -61,7 +62,7 @@ func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRobotsSize))
 	if err != nil {
 		return nil, err
 	}
