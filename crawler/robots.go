@@ -11,9 +11,10 @@ import (
 )
 
 type entry struct {
-	once sync.Once
-	data *robotstxt.RobotsData
-	err  error
+	once    sync.Once
+	data    *robotstxt.RobotsData
+	err     error
+	expires time.Time
 }
 
 type RobotCache struct {
@@ -26,6 +27,8 @@ const (
 	userAgent     = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
 	robotsToken   = "WebCrawler"
 	maxRobotsSize = 512 << 10 // 512 KiB
+	successTTL    = 24 * time.Hour
+	failureTTL    = 5 * time.Minute
 )
 
 func NewRobotCache() *RobotCache {
@@ -35,20 +38,39 @@ func NewRobotCache() *RobotCache {
 	}
 }
 
-func (rc *RobotCache) Get(host string, scheme string) (*robotstxt.RobotsData, error) {
+func (rc *RobotCache) Get(scheme, host string) (*robotstxt.RobotsData, error) {
 	origin := scheme + "://" + host
-	rc.mu.Lock()
-	e, ok := rc.entries[host]
-	if !ok {
-		e = &entry{}
-		rc.entries[host] = e
-	}
-	rc.mu.Unlock()
 
-	e.once.Do(func() {
-		e.data, e.err = rc.fetch(origin)
-	})
-	return e.data, e.err
+	for {
+		rc.mu.Lock()
+		e, ok := rc.entries[origin]
+		if !ok {
+			e = &entry{}
+			rc.entries[origin] = e
+		}
+		rc.mu.Unlock()
+
+		e.once.Do(func() {
+			e.data, e.err = rc.fetch(origin)
+			ttl := successTTL
+			if e.err != nil {
+				ttl = failureTTL
+			}
+			e.expires = time.Now().Add(ttl)
+		})
+
+		if time.Now().Before(e.expires) {
+			return e.data, e.err
+		}
+
+		// Expired: remove it (only if nobody already replaced it), then loop
+		// to create a fresh entry and fetch again.
+		rc.mu.Lock()
+		if rc.entries[origin] == e { //Several goroutines can see the same expired entry. The first deletes it and a new entry gets created. Without this check, a second goroutine would delete the new entry and cause a duplicate fetch.
+			delete(rc.entries, origin)
+		}
+		rc.mu.Unlock()
+	}
 }
 
 func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
