@@ -30,7 +30,8 @@ func NewRobotCache() *RobotCache {
 	}
 }
 
-func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
+func (rc *RobotCache) Get(host string, scheme string) (*robotstxt.RobotsData, error) {
+	origin := scheme + "://" + host
 	rc.mu.Lock()
 	e, ok := rc.entries[host]
 	if !ok {
@@ -40,13 +41,13 @@ func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
 	rc.mu.Unlock()
 
 	e.once.Do(func() {
-		e.data, e.err = rc.fetch(host)
+		e.data, e.err = rc.fetch(origin)
 	})
 	return e.data, e.err
 }
 
-func (rc *RobotCache) fetch(host string) (*robotstxt.RobotsData, error) {
-	req, err := http.NewRequest("GET", "https://"+host+"/robots.txt", nil)
+func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
+	req, err := http.NewRequest("GET", origin+"/robots.txt", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
 		return false, err
 	}
 
-	data, err := rc.Get(url.Host)
+	data, err := rc.Get(url.Host, url.Scheme)
 	if err != nil {
 		return false, err
 	}
