@@ -22,7 +22,10 @@ type RobotCache struct {
 	client  *http.Client
 }
 
-const userAgent = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
+const (
+	userAgent   = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
+	robotsToken = "WebCrawler"
+)
 
 func NewRobotCache() *RobotCache {
 	return &RobotCache{
@@ -75,7 +78,7 @@ func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	group := data.FindGroup(userAgent)
+	group := data.FindGroup(robotsToken)
 
 	path := url.Path
 	if url.RawQuery != "" {
