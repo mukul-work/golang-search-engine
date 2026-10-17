@@ -9,28 +9,43 @@ import (
 	"github.com/temoto/robotstxt"
 )
 
+type entry struct {
+	once sync.Once
+	data *robotstxt.RobotsData
+	err  error
+}
+
 type RobotCache struct {
-	mu     sync.Mutex
-	cache  map[string]*robotstxt.RobotsData
-	client *http.Client
+	mu      sync.Mutex
+	entries map[string]*entry
+	client  *http.Client
 }
 
 const userAgent = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
 
 func NewRobotCache() *RobotCache {
 	return &RobotCache{
-		mu:     sync.Mutex{},
-		cache:  make(map[string]*robotstxt.RobotsData),
-		client: &http.Client{Timeout: 10 * time.Second},
+		entries: make(map[string]*entry),
+		client:  &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
 	rc.mu.Lock()
-	defer rc.mu.Unlock()
-	if data, ok := rc.cache[host]; ok {
-		return data, nil
+	e, ok := rc.entries[host]
+	if !ok {
+		e = &entry{}
+		rc.entries[host] = e
 	}
+	rc.mu.Unlock()
+
+	e.once.Do(func() {
+		e.data, e.err = rc.fetch(host)
+	})
+	return e.data, e.err
+}
+
+func (rc *RobotCache) fetch(host string) (*robotstxt.RobotsData, error) {
 	req, err := http.NewRequest("GET", "https://"+host+"/robots.txt", nil)
 	if err != nil {
 		return nil, err
@@ -41,12 +56,7 @@ func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := robotstxt.FromResponse(resp)
-	if err != nil {
-		return nil, err
-	}
-	rc.cache[host] = data
-	return data, nil
+	return robotstxt.FromResponse(resp)
 }
 
 func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
