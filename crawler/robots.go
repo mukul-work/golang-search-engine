@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -57,7 +58,11 @@ func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return robotstxt.FromResponse(resp)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return robotstxt.FromStatusAndBytes(resp.StatusCode, body)
 }
 
 func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
