@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,7 +40,7 @@ func NewRobotCache() *RobotCache {
 }
 
 func (rc *RobotCache) Get(scheme, host string) (*robotstxt.RobotsData, error) {
-	origin := scheme + "://" + host
+	origin := scheme + "://" + strings.ToLower(host)
 
 	for {
 		rc.mu.Lock()
@@ -78,7 +79,7 @@ func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("user-Agent", userAgent)
+	req.Header.Set("User-Agent", userAgent)
 	resp, err := rc.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -91,21 +92,16 @@ func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
 	return robotstxt.FromStatusAndBytes(resp.StatusCode, body)
 }
 
-func (rc *RobotCache) Allowed(rawUrl string) (bool, error) {
-	url, err := url.Parse(rawUrl)
+func (rc *RobotCache) Allowed(rawURL string) (bool, error) {
+	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false, err
 	}
 
-	data, err := rc.Get(url.Host, url.Scheme)
+	data, err := rc.Get(u.Scheme, u.Host)
 	if err != nil {
 		return false, err
 	}
 	group := data.FindGroup(robotsToken)
-
-	path := url.Path
-	if url.RawQuery != "" {
-		path += "?" + url.RawQuery
-	}
-	return group.Test(path), nil
+	return group.Test(u.RequestURI()), nil
 }
