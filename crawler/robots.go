@@ -4,21 +4,24 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"time"
 
 	"github.com/temoto/robotstxt"
 )
 
 type RobotCache struct {
-	mu    sync.Mutex
-	cache map[string]*robotstxt.RobotsData
+	mu     sync.Mutex
+	cache  map[string]*robotstxt.RobotsData
+	client *http.Client
 }
 
 const userAgent = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
 
 func NewRobotCache() *RobotCache {
 	return &RobotCache{
-		mu:    sync.Mutex{},
-		cache: make(map[string]*robotstxt.RobotsData),
+		mu:     sync.Mutex{},
+		cache:  make(map[string]*robotstxt.RobotsData),
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -33,7 +36,7 @@ func (rc *RobotCache) Get(host string) (*robotstxt.RobotsData, error) {
 		return nil, err
 	}
 	req.Header.Set("user-Agent", userAgent)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := rc.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
