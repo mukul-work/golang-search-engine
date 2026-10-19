@@ -7,7 +7,12 @@ import (
 	"time"
 )
 
-const httpTimeout = 10 * time.Second
+type Options struct {
+	Workers        int
+	RequestTimeout time.Duration
+	MaxPageBytes   int64
+	HostInterval   time.Duration
+}
 
 type PageIndexer interface {
 	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
@@ -24,16 +29,16 @@ type Crawler struct {
 	wg       sync.WaitGroup
 }
 
-func New(store PageIndexer, workers int) *Crawler {
-	client := &http.Client{Timeout: httpTimeout} // one client, one connection pool
+func New(store PageIndexer, opts Options) *Crawler {
+	client := &http.Client{Timeout: opts.RequestTimeout} // one client, one connection pool
 	return &Crawler{
 		frontier: NewFrontier(),
 		visited:  NewVisitedSet(),
 		robots:   NewRobotCache(client),
-		limiter:  NewHostLimiter(),
-		fetcher:  NewHTTPFetcher(client),
+		limiter:  NewHostLimiter(opts.HostInterval),
+		fetcher:  NewHTTPFetcher(client, opts.MaxPageBytes),
 		store:    store,
-		workers:  workers,
+		workers:  opts.Workers,
 	}
 }
 

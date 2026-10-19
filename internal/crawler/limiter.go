@@ -13,11 +13,13 @@ import (
 type HostLimiter struct {
 	mu       sync.Mutex
 	limiters map[string]*rate.Limiter
+	interval time.Duration
 }
 
-func NewHostLimiter() *HostLimiter {
+func NewHostLimiter(interval time.Duration) *HostLimiter {
 	return &HostLimiter{
 		limiters: make(map[string]*rate.Limiter),
+		interval: interval,
 	}
 }
 
@@ -27,7 +29,7 @@ func (hl *HostLimiter) getLimiter(host string) *rate.Limiter {
 
 	lim, ok := hl.limiters[host]
 	if !ok {
-		lim = rate.NewLimiter(rate.Every(time.Second), 1) // 1 req/sec, burst 1
+		lim = rate.NewLimiter(rate.Every(hl.interval), 1) // burst 1
 		hl.limiters[host] = lim
 	}
 	return lim

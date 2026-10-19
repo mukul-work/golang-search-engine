@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-const maxPageSize = 5 << 20 // 5 MiB
-
 type Page struct {
 	Body        string
 	ContentType string
@@ -21,11 +19,12 @@ type Fetcher interface {
 }
 
 type HTTPFetcher struct {
-	client *http.Client
+	client   *http.Client
+	maxBytes int64
 }
 
-func NewHTTPFetcher(client *http.Client) *HTTPFetcher {
-	return &HTTPFetcher{client: client}
+func NewHTTPFetcher(client *http.Client, maxBytes int64) *HTTPFetcher {
+	return &HTTPFetcher{client: client, maxBytes: maxBytes}
 }
 
 func (f *HTTPFetcher) Fetch(ctx context.Context, url string) (*Page, error) {
@@ -50,7 +49,7 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string) (*Page, error) {
 		return nil, fmt.Errorf("invalid content type: %s", contentType)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPageSize))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
