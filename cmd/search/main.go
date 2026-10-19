@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/joho/godotenv"
+	"github.com/mukul-work/golang-search-engine/internal/config"
 	"github.com/mukul-work/golang-search-engine/internal/db"
 	"github.com/mukul-work/golang-search-engine/internal/search"
 )
@@ -23,14 +23,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	// load environment variables
-	err := godotenv.Load(".env.local")
-	if err != nil {
-		log.Fatal("Error loading .env file")
+	if err := config.LoadDotEnv(".env.local"); err != nil {
+		log.Fatalf("loading .env.local: %v", err)
 	}
 
 	// create a db pool
 	dbURL := os.Getenv("DB_URL")
+	if dbURL == "" {
+		log.Fatal("DB_URL is required")
+	}
 	ctx := context.Background()
 	store, err := db.New(ctx, dbURL)
 	if err != nil {

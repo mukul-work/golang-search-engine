@@ -12,6 +12,15 @@ import (
 	"time"
 )
 
+func testOptions() Options {
+	return Options{
+		Workers:        2,
+		RequestTimeout: time.Second,
+		MaxPageBytes:   1 << 20,
+		HostInterval:   0, // no rate limiting: tests don't need to wait
+	}
+}
+
 type fakeFetcher struct {
 	pages map[string]string // url -> HTML; unknown URLs fail
 }
@@ -37,7 +46,7 @@ func (f *fakeIndexer) IndexPage(_ context.Context, _ map[string]int, url, _, _ s
 }
 
 func TestEnqueue_RejectsDuplicates(t *testing.T) {
-	c := New(nil, 1)
+	c := New(nil, testOptions())
 
 	if !c.enqueue("https://example.com/a") {
 		t.Error("first enqueue should be accepted")
@@ -51,7 +60,7 @@ func TestEnqueue_RejectsDuplicates(t *testing.T) {
 }
 
 func TestEnqueue_WaitGroupMatchesAcceptedURLs(t *testing.T) {
-	c := New(nil, 1)
+	c := New(nil, testOptions())
 	c.enqueue("https://example.com/a")
 	c.enqueue("https://example.com/a") // duplicate: must NOT touch the counter
 	c.enqueue("https://example.com/b")
@@ -103,7 +112,7 @@ func TestRun_CrawlsDiscoveredLinks(t *testing.T) {
 	seed, next := srv.URL+"/", srv.URL+"/a"
 
 	idx := &fakeIndexer{}
-	c := New(idx, 2)
+	c := New(idx, testOptions())
 	c.fetcher = &fakeFetcher{pages: map[string]string{
 		seed: `<html><head><title>Home</title></head><body>hello <a href="/a">a</a></body></html>`,
 		next: `<html><body>second page</body></html>`,
@@ -123,7 +132,7 @@ func TestRun_CrawlsDiscoveredLinks(t *testing.T) {
 func TestRun_FetchErrorStillFinishes(t *testing.T) {
 	srv := newRobotsServer(t)
 	idx := &fakeIndexer{}
-	c := New(idx, 2)
+	c := New(idx, testOptions())
 	c.fetcher = &fakeFetcher{} // knows no pages, so every Fetch fails
 
 	runWithTimeout(t, c, []string{srv.URL + "/missing"})

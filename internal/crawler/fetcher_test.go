@@ -9,8 +9,10 @@ import (
 	"time"
 )
 
-func newTestFetcher(timeout time.Duration) *HTTPFetcher {
-	return NewHTTPFetcher(&http.Client{Timeout: timeout})
+const testMaxBytes = 1 << 20
+
+func newTestFetcher(timeout time.Duration, maxBytes int64) *HTTPFetcher {
+	return NewHTTPFetcher(&http.Client{Timeout: timeout}, maxBytes)
 }
 
 func TestFetch_Success(t *testing.T) {
@@ -20,7 +22,7 @@ func TestFetch_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	page, err := newTestFetcher(time.Second).Fetch(context.Background(), srv.URL)
+	page, err := newTestFetcher(time.Second, testMaxBytes).Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -37,7 +39,7 @@ func TestFetch_SendsUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := newTestFetcher(time.Second).Fetch(context.Background(), srv.URL); err != nil {
+	if _, err := newTestFetcher(time.Second, testMaxBytes).Fetch(context.Background(), srv.URL); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if ua := <-got; ua != userAgent {
@@ -63,7 +65,7 @@ func TestFetch_Errors(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			if _, err := newTestFetcher(time.Second).Fetch(context.Background(), srv.URL); err == nil {
+			if _, err := newTestFetcher(time.Second, testMaxBytes).Fetch(context.Background(), srv.URL); err == nil {
 				t.Error("expected an error, got nil")
 			}
 		})
@@ -71,18 +73,19 @@ func TestFetch_Errors(t *testing.T) {
 }
 
 func TestFetch_TruncatesHugeBody(t *testing.T) {
+	const limit = 1024
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(strings.Repeat("a", maxPageSize+1000)))
+		w.Write([]byte(strings.Repeat("a", limit*10)))
 	}))
 	defer srv.Close()
 
-	page, err := newTestFetcher(5*time.Second).Fetch(context.Background(), srv.URL)
+	page, err := newTestFetcher(5*time.Second, testMaxBytes).Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(page.Body) != maxPageSize {
-		t.Errorf("len(body) = %d, want %d", len(page.Body), maxPageSize)
+	if len(page.Body) != limit {
+		t.Errorf("len(body) = %d, want %d", len(page.Body), limit)
 	}
 }
 
@@ -96,7 +99,7 @@ func TestFetch_TimesOutOnSilentServer(t *testing.T) {
 	defer srv.Close()
 
 	start := time.Now()
-	_, err := newTestFetcher(100*time.Millisecond).Fetch(context.Background(), srv.URL)
+	_, err := newTestFetcher(100*time.Millisecond, testMaxBytes).Fetch(context.Background(), srv.URL)
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
