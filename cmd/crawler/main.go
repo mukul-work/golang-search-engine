@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"sync"
 
 	"github.com/joho/godotenv"
 	"github.com/mukul-work/golang-search-engine/internal/crawler"
@@ -50,30 +49,13 @@ func main() {
 	}
 	defer store.Close()
 
-	f := crawler.NewFrontier()
-	visited := crawler.NewVisitedSet()
-	rc := crawler.NewRobotCache()
-	hl := crawler.NewHostLimiter()
-	var wg sync.WaitGroup
-
-	numWorkers := 10
-	for i := 0; i < numWorkers; i++ {
-		go crawler.Worker(i, f, &wg, visited, rc, hl, store)
-	}
+	c := crawler.New(store, 10)
 	seeds := []string{
 		"https://example.com",
 		"https://scrapfly.io/blog/posts/best-websites-to-practice-web-scraping",
 		"https://www.searchenginejournal.com/alternative-search-engines/271409/",
 	}
-
-	for _, seed := range seeds {
-		if !visited.IsVisited(seed) {
-			wg.Add(1)
-			f.Push(seed)
-		}
-	}
-	wg.Wait()
-	f.Close()
-	fmt.Println("Crawl complete. Total URLs visited:", visited.Count())
+	c.Run(seeds)
+	fmt.Println("Crawl complete. Total URLs visited:", c.VisitedCount())
 
 }
