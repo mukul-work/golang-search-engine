@@ -5,17 +5,12 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 
 	"github.com/mukul-work/golang-search-engine/internal/indexer"
 	"golang.org/x/net/html"
 )
 
-type PageIndexer interface {
-	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
-}
-
-func fetchUrl(url string, workerNum int, idx PageIndexer) ([]string, error) {
+func (c *Crawler) fetchUrl(url string, workerNum int) ([]string, error) {
 	htmlBody, contentType, statusCode, err := GetPageData(url)
 	if err != nil {
 		err = fmt.Errorf("Error while fetching the page data for '%s': %v\n", url, err)
@@ -56,7 +51,7 @@ func fetchUrl(url string, workerNum int, idx PageIndexer) ([]string, error) {
 		return nil, fmt.Errorf("Problem extracting title: %w", err)
 	}
 
-	if err := idx.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
+	if err := c.store.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
 		return nil, fmt.Errorf("Failed to insert into the database: %w", err)
 	}
 
@@ -73,46 +68,42 @@ func fetchUrl(url string, workerNum int, idx PageIndexer) ([]string, error) {
 
 }
 
-func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache, hl *HostLimiter, idx PageIndexer) {
-	for url := range f.out {
-		Allowed, err := rc.Allowed(url)
-		if err != nil {
-			fmt.Printf("Worker: %d Error while working with robots.txt: %v", workerNum, err)
-			wg.Done()
-			continue
-		}
+func (c *Crawler) worker(num int) {
+	for url := range c.frontier.out {
+		c.process(num, url)
+	}
+}
 
-		if !Allowed {
-			fmt.Printf("Worker: %d Skipping (robots.txt disallows): %s\n", workerNum, url)
-			wg.Done()
-			continue
-		}
-		if err := hl.Wait(url); err != nil { // <-- rate limit, blocks per host
-			fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
-			wg.Done()
-			continue
-		}
-		links, err := fetchUrl(url, workerNum, idx)
-		if err != nil {
-			log.Printf("Worker: %d %v\n", workerNum, err)
-			wg.Done()
-			continue
+func (c *Crawler) process(workerNum int, url string) {
+	defer c.wg.Done() // exactly one Done per dequeued URL, on every return path
 
-		}
-
-		fmt.Printf("Worker: %d List of links for '%s':\n\n", workerNum, url)
-		for _, link := range links {
-			fmt.Printf("Worker: %d Link before checking in the visited Set: %s\n", workerNum, link)
-			if !v.IsVisited(link) { // check for already visited URL
-				fmt.Printf("Worker: %d Link pushed to visited set\n\n", workerNum)
-				wg.Add(1)
-				f.Push(link)
-			} else {
-				fmt.Printf("Worker: %d Link already in visited set\n\n", workerNum)
-			}
-		}
-		fmt.Printf("Worker: %d Visited URL: %s\n\n\n\n", workerNum, url)
-		wg.Done() // URL parsed
+	allowed, err := c.robots.Allowed(url)
+	if err != nil {
+		fmt.Printf("Worker: %d Error while working with robots.txt: %v\n", workerNum, err)
+		return
+	}
+	if !allowed {
+		fmt.Printf("Worker: %d Skipping (robots.txt disallows): %s\n", workerNum, url)
+		return
+	}
+	if err := c.limiter.Wait(url); err != nil {
+		fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
+		return
+	}
+	links, err := c.fetchUrl(url, workerNum)
+	if err != nil {
+		log.Printf("Worker: %d %v\n", workerNum, err)
+		return
 	}
 
+	fmt.Printf("Worker: %d List of links for '%s':\n\n", workerNum, url)
+	for _, link := range links {
+		fmt.Printf("Worker: %d Link before checking in the visited Set: %s\n", workerNum, link)
+		if c.enqueue(link) {
+			fmt.Printf("Worker: %d Link pushed to visited set\n\n", workerNum)
+		} else {
+			fmt.Printf("Worker: %d Link already in visited set\n\n", workerNum)
+		}
+	}
+	fmt.Printf("Worker: %d Visited URL: %s\n\n\n\n", workerNum, url)
 }
