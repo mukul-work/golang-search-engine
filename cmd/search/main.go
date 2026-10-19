@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
-	"github.com/mukul-work/golang-search-engine/db"
-	"github.com/mukul-work/golang-search-engine/search"
+	"github.com/mukul-work/golang-search-engine/internal/db"
+	"github.com/mukul-work/golang-search-engine/internal/search"
 )
 
 func main() {

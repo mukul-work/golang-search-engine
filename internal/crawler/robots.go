@@ -25,7 +25,7 @@ type RobotCache struct {
 }
 
 const (
-	userAgent     = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-web-crawler)"
+	userAgent     = "WebCrawler/0.1 (+https://github.com/mukul-work/golang-search-engine)"
 	robotsToken   = "WebCrawler"
 	maxRobotsSize = 512 << 10 // 512 KiB
 	successTTL    = 24 * time.Hour

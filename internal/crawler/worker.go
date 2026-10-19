@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mukul-work/golang-search-engine/db"
-	"github.com/mukul-work/golang-search-engine/indexer"
+	"github.com/mukul-work/golang-search-engine/internal/db"
+	"github.com/mukul-work/golang-search-engine/internal/indexer"
 	"golang.org/x/net/html"
 )
 
