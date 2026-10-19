@@ -11,22 +11,17 @@ import (
 )
 
 func (c *Crawler) fetchUrl(url string, workerNum int) ([]string, error) {
-	htmlBody, contentType, statusCode, err := GetPageData(url)
+	// context.Background() is temporary: the graceful-shutdown step threads a real ctx through.
+	page, err := c.fetcher.Fetch(context.Background(), url)
 	if err != nil {
-		err = fmt.Errorf("Error while fetching the page data for '%s': %v\n", url, err)
-		return nil, err
-	}
-
-	if !strings.HasPrefix(strings.ToLower(contentType), "text/html") {
-		fmt.Printf("Worker: %d Skipping non-HTML (%s): %s\n", workerNum, contentType, url)
-		return nil, nil
+		return nil, fmt.Errorf("error while fetching the page data for '%s': %w", url, err)
 	}
 
 	fmt.Printf("Worker: %d Trying to visit: %s\n", workerNum, url)
-	fmt.Printf("Worker: %d Content Type: %s\n", workerNum, contentType)
-	fmt.Printf("Worker: %d Status Code: %d\n", workerNum, statusCode)
+	fmt.Printf("Worker: %d Content Type: %s\n", workerNum, page.ContentType)
+	fmt.Printf("Worker: %d Status Code: %d\n", workerNum, page.StatusCode)
 
-	doc, err := html.Parse(strings.NewReader(htmlBody))
+	doc, err := html.Parse(strings.NewReader(page.Body))
 	if err != nil {
 		return nil, fmt.Errorf("Problem while parsing the HTML before passing it into the GetHTMLData: %w", err)
 	}

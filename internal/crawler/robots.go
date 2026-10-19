@@ -32,10 +32,10 @@ const (
 	failureTTL    = 5 * time.Minute
 )
 
-func NewRobotCache() *RobotCache {
+func NewRobotCache(client *http.Client) *RobotCache {
 	return &RobotCache{
 		entries: make(map[string]*entry),
-		client:  &http.Client{Timeout: 10 * time.Second},
+		client:  client,
 	}
 }
 

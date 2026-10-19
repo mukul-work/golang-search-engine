@@ -2,8 +2,12 @@ package crawler
 
 import (
 	"context"
+	"net/http"
 	"sync"
+	"time"
 )
+
+const httpTimeout = 10 * time.Second
 
 type PageIndexer interface {
 	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
@@ -14,17 +18,20 @@ type Crawler struct {
 	visited  *VisitedSet
 	robots   *RobotCache
 	limiter  *HostLimiter
+	fetcher  Fetcher
 	store    PageIndexer
 	workers  int
 	wg       sync.WaitGroup
 }
 
 func New(store PageIndexer, workers int) *Crawler {
+	client := &http.Client{Timeout: httpTimeout} // one client, one connection pool
 	return &Crawler{
 		frontier: NewFrontier(),
 		visited:  NewVisitedSet(),
-		robots:   NewRobotCache(),
+		robots:   NewRobotCache(client),
 		limiter:  NewHostLimiter(),
+		fetcher:  NewHTTPFetcher(client),
 		store:    store,
 		workers:  workers,
 	}
