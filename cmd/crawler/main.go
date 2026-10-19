@@ -44,11 +44,11 @@ func main() {
 	// create a db pool
 	dbURL := os.Getenv("DB_URL")
 	ctx := context.Background()
-	err = db.Connect(ctx, dbURL)
+	store, err := db.New(ctx, dbURL)
 	if err != nil {
 		log.Fatalf("failed to connect to db: %v", err)
 	}
-	defer db.Pool.Close()
+	defer store.Close()
 
 	f := crawler.NewFrontier()
 	visited := crawler.NewVisitedSet()
@@ -58,7 +58,7 @@ func main() {
 
 	numWorkers := 10
 	for i := 0; i < numWorkers; i++ {
-		go crawler.Worker(i, f, &wg, visited, rc, hl)
+		go crawler.Worker(i, f, &wg, visited, rc, hl, store)
 	}
 	seeds := []string{
 		"https://example.com",

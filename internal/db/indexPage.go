@@ -6,8 +6,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error {
-	tx, err := Pool.Begin(ctx)
+func (s *Store) IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error {
+	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}

@@ -1,14 +1,12 @@
-package search
+package db
 
 import (
 	"context"
 
-	"github.com/mukul-work/golang-search-engine/internal/db"
-	"github.com/mukul-work/golang-search-engine/internal/indexer"
 	"github.com/mukul-work/golang-search-engine/internal/models"
 )
 
-const query = `
+const searchQuery = `
 WITH stats AS (
     SELECT COUNT(*)::float8 AS n, AVG(total_words)::float8 AS avgdl
     FROM pages
@@ -39,18 +37,8 @@ HAVING COUNT(*) = $2
 ORDER BY score DESC
 LIMIT $3`
 
-func Query(ctx context.Context, q string, limit int) ([]models.Result, error) {
-	countsOfWords := indexer.Tokenize(q) // q = web-crawler/search-engine  web 1, crawler 1 search 1 engine 1
-	if len(countsOfWords) == 0 {
-		return nil, nil
-	}
-	// fmt.Printf("countOfWords: %d", len(countsOfWords))
-	terms := make([]string, 0, len(countsOfWords))
-	for term := range countsOfWords {
-		terms = append(terms, term)
-	}
-	// fmt.Printf("terms=%q count=%d\n", terms, len(terms))
-	rows, err := db.Pool.Query(ctx, query, terms, len(terms), limit)
+func (s *Store) SearchPages(ctx context.Context, terms []string, limit int) ([]models.Result, error) {
+	rows, err := s.pool.Query(ctx, searchQuery, terms, len(terms), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -68,5 +56,4 @@ func Query(ctx context.Context, q string, limit int) ([]models.Result, error) {
 		return nil, err
 	}
 	return results, nil
-
 }

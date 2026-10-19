@@ -7,12 +7,15 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mukul-work/golang-search-engine/internal/db"
 	"github.com/mukul-work/golang-search-engine/internal/indexer"
 	"golang.org/x/net/html"
 )
 
-func fetchUrl(url string, workerNum int) ([]string, error) {
+type PageIndexer interface {
+	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
+}
+
+func fetchUrl(url string, workerNum int, idx PageIndexer) ([]string, error) {
 	htmlBody, contentType, statusCode, err := GetPageData(url)
 	if err != nil {
 		err = fmt.Errorf("Error while fetching the page data for '%s': %v\n", url, err)
@@ -53,7 +56,7 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 		return nil, fmt.Errorf("Problem extracting title: %w", err)
 	}
 
-	if err := db.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
+	if err := idx.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
 		return nil, fmt.Errorf("Failed to insert into the database: %w", err)
 	}
 
@@ -70,7 +73,7 @@ func fetchUrl(url string, workerNum int) ([]string, error) {
 
 }
 
-func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache, hl *HostLimiter) {
+func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *RobotCache, hl *HostLimiter, idx PageIndexer) {
 	for url := range f.out {
 		Allowed, err := rc.Allowed(url)
 		if err != nil {
@@ -89,7 +92,7 @@ func Worker(workerNum int, f *Frontier, wg *sync.WaitGroup, v *VisitedSet, rc *R
 			wg.Done()
 			continue
 		}
-		links, err := fetchUrl(url, workerNum)
+		links, err := fetchUrl(url, workerNum, idx)
 		if err != nil {
 			log.Printf("Worker: %d %v\n", workerNum, err)
 			wg.Done()
