@@ -10,9 +10,10 @@ import (
 	"golang.org/x/net/html"
 )
 
-func (c *Crawler) fetchUrl(url string, workerNum int) ([]string, error) {
+func (c *Crawler) fetchUrl(ctx context.Context, url string, workerNum int) ([]string, error) {
 	// context.Background() is temporary: the graceful-shutdown step threads a real ctx through.
-	page, err := c.fetcher.Fetch(context.Background(), url)
+	// page, err := c.fetcher.Fetch(context.Background(), url)
+	page, err := c.fetcher.Fetch(ctx, url)
 	if err != nil {
 		return nil, fmt.Errorf("error while fetching the page data for '%s': %w", url, err)
 	}
@@ -46,7 +47,7 @@ func (c *Crawler) fetchUrl(url string, workerNum int) ([]string, error) {
 		return nil, fmt.Errorf("Problem extracting title: %w", err)
 	}
 
-	if err := c.store.IndexPage(context.Background(), wordCounts, url, title, text, total); err != nil {
+	if err := c.store.IndexPage(ctx, wordCounts, url, title, text, total); err != nil {
 		return nil, fmt.Errorf("Failed to insert into the database: %w", err)
 	}
 
@@ -63,31 +64,45 @@ func (c *Crawler) fetchUrl(url string, workerNum int) ([]string, error) {
 
 }
 
-func (c *Crawler) worker(num int) {
+func (c *Crawler) worker(ctx context.Context, num int) {
 	for url := range c.frontier.out {
-		c.process(num, url)
+		c.process(ctx, num, url)
 	}
 }
 
-func (c *Crawler) process(workerNum int, url string) {
+func (c *Crawler) process(ctx context.Context, workerNum int, url string) {
 	defer c.wg.Done() // exactly one Done per dequeued URL, on every return path
 
-	allowed, err := c.robots.Allowed(url)
+	// After a cancel, workers keep receiving only to drain the queue so the
+	// WaitGroup reaches zero. Skip the work.
+	if ctx.Err() != nil {
+		return
+	}
+	allowed, err := c.robots.Allowed(ctx, url)
 	if err != nil {
-		fmt.Printf("Worker: %d Error while working with robots.txt: %v\n", workerNum, err)
+		if ctx.Err() == nil { // stay quiet about errors caused by shutdown
+			fmt.Printf("Worker: %d Error while working with robots.txt: %v\n", workerNum, err)
+		}
 		return
 	}
 	if !allowed {
 		fmt.Printf("Worker: %d Skipping (robots.txt disallows): %s\n", workerNum, url)
 		return
 	}
-	if err := c.limiter.Wait(url); err != nil {
-		fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
+	if err := c.limiter.Wait(ctx, url); err != nil {
+		if ctx.Err() == nil {
+			fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
+		}
 		return
 	}
-	links, err := c.fetchUrl(url, workerNum)
+	links, err := c.fetchUrl(ctx, url, workerNum)
 	if err != nil {
-		log.Printf("Worker: %d %v\n", workerNum, err)
+		if ctx.Err() == nil {
+			log.Printf("Worker: %d %v\n", workerNum, err)
+		}
+		return
+	}
+	if ctx.Err() != nil { // don't queue children of a page we are abandoning
 		return
 	}
 

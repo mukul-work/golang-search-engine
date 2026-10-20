@@ -1,6 +1,7 @@
 package crawler
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,10 +40,15 @@ func NewRobotCache(client *http.Client) *RobotCache {
 	}
 }
 
-func (rc *RobotCache) Get(scheme, host string) (*robotstxt.RobotsData, error) {
+func (rc *RobotCache) Get(ctx context.Context, scheme, host string) (*robotstxt.RobotsData, error) {
 	origin := scheme + "://" + strings.ToLower(host)
 
 	for {
+
+		if err := ctx.Err(); err != nil { // also stops the retry loop from spinning if we are cancelled
+			return nil, err
+		}
+
 		rc.mu.Lock()
 		e, ok := rc.entries[origin]
 		if !ok {
@@ -52,10 +58,13 @@ func (rc *RobotCache) Get(scheme, host string) (*robotstxt.RobotsData, error) {
 		rc.mu.Unlock()
 
 		e.once.Do(func() {
-			e.data, e.err = rc.fetch(origin)
+			e.data, e.err = rc.fetch(ctx, origin)
 			ttl := successTTL
 			if e.err != nil {
 				ttl = failureTTL
+				if ctx.Err() != nil {
+					ttl = 0 // cancelled mid-fetch: expire at once instead of caching it
+				}
 			}
 			e.expires = time.Now().Add(ttl)
 		})
@@ -74,8 +83,8 @@ func (rc *RobotCache) Get(scheme, host string) (*robotstxt.RobotsData, error) {
 	}
 }
 
-func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
-	req, err := http.NewRequest("GET", origin+"/robots.txt", nil)
+func (rc *RobotCache) fetch(ctx context.Context, origin string) (*robotstxt.RobotsData, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, origin+"/robots.txt", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -92,13 +101,13 @@ func (rc *RobotCache) fetch(origin string) (*robotstxt.RobotsData, error) {
 	return robotstxt.FromStatusAndBytes(resp.StatusCode, body)
 }
 
-func (rc *RobotCache) Allowed(rawURL string) (bool, error) {
+func (rc *RobotCache) Allowed(ctx context.Context, rawURL string) (bool, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return false, err
 	}
 
-	data, err := rc.Get(u.Scheme, u.Host)
+	data, err := rc.Get(ctx, u.Scheme, u.Host)
 	if err != nil {
 		return false, err
 	}

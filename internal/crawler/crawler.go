@@ -51,15 +51,19 @@ func (c *Crawler) enqueue(url string) bool {
 	return true
 }
 
-func (c *Crawler) Run(seeds []string) {
+// Run crawls from the seeds and blocks until no URLs remain or ctx is
+// cancelled. It returns ctx.Err(), so a non-nil result means the crawl was
+// cut short.
+func (c *Crawler) Run(ctx context.Context, seeds []string) error {
 	for i := 0; i < c.workers; i++ {
-		go c.worker(i)
+		go c.worker(ctx, i)
 	}
 	for _, seed := range seeds {
 		c.enqueue(seed)
 	}
-	c.wg.Wait()
+	c.wg.Wait() // after a cancel this still reaches zero: workers drain the queue
 	c.frontier.Close()
+	return ctx.Err()
 }
 
 func (c *Crawler) VisitedCount() int {

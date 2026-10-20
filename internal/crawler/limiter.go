@@ -35,14 +35,14 @@ func (hl *HostLimiter) getLimiter(host string) *rate.Limiter {
 	return lim
 }
 
-func (hl *HostLimiter) Wait(rawURL string) error {
+func (hl *HostLimiter) Wait(ctx context.Context, rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return err
 	}
 	lim := hl.getLimiter(u.Host)
 	start := time.Now()
-	err = lim.Wait(context.Background())
+	err = lim.Wait(ctx)
 	elapsed := time.Since(start)
 
 	if elapsed > 10*time.Millisecond { // only log if it actually waited

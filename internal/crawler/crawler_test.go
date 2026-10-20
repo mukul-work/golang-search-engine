@@ -97,7 +97,7 @@ func runWithTimeout(t *testing.T, c *Crawler, seeds []string) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
-		c.Run(seeds)
+		c.Run(context.Background(), seeds)
 		close(done)
 	}()
 	select {
@@ -137,6 +137,56 @@ func TestRun_FetchErrorStillFinishes(t *testing.T) {
 
 	runWithTimeout(t, c, []string{srv.URL + "/missing"})
 
+	if len(idx.urls) != 0 {
+		t.Errorf("indexed %v, want nothing", idx.urls)
+	}
+}
+
+// blockingFetcher simulates a request in flight: it signals that it started,
+// then blocks until the context is cancelled.
+type blockingFetcher struct {
+	started chan struct{}
+}
+
+func (b *blockingFetcher) Fetch(ctx context.Context, _ string) (*Page, error) {
+	select {
+	case b.started <- struct{}{}:
+	default: // already signalled
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestRun_CancelStopsTheCrawl(t *testing.T) {
+	srv := newRobotsServer(t)
+	idx := &fakeIndexer{}
+	c := New(idx, testOptions()) // 2 workers
+	bf := &blockingFetcher{started: make(chan struct{}, 1)}
+	c.fetcher = bf
+
+	// 4 seeds, 2 workers: two fetches block, two URLs wait in the queue.
+	seeds := []string{srv.URL + "/1", srv.URL + "/2", srv.URL + "/3", srv.URL + "/4"}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errc := make(chan error, 1)
+	go func() { errc <- c.Run(ctx, seeds) }()
+
+	select {
+	case <-bf.started: // a fetch is now genuinely in flight
+	case <-time.After(5 * time.Second):
+		t.Fatal("no fetch ever started")
+	}
+	cancel()
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run returned %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return after cancel: queued URLs were never drained")
+	}
 	if len(idx.urls) != 0 {
 		t.Errorf("indexed %v, want nothing", idx.urls)
 	}

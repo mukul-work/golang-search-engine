@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/mukul-work/golang-search-engine/internal/config"
 	"github.com/mukul-work/golang-search-engine/internal/crawler"
@@ -14,20 +16,34 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	if err := config.LoadDotEnv(".env.local"); err != nil {
-		log.Fatalf("loading .env.local: %v", err)
+		return fmt.Errorf("loading .env.local: %w", err)
 	}
 	cfg, err := config.Load(os.Args[1:], os.Getenv)
 	if errors.Is(err, flag.ErrHelp) {
-		return // -h was passed and usage was already printed
+		return nil // -h was passed and usage was already printed
 	}
 	if err != nil {
-		log.Fatalf("invalid configuration:\n%v", err)
+		return fmt.Errorf("invalid configuration:\n%w", err)
 	}
+
+	// ctx is cancelled on Ctrl-C or SIGTERM (what `docker stop` sends).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop() // restore default handling: a second Ctrl-C now kills us immediately
+	}()
 
 	store, err := db.New(context.Background(), cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("failed to connect to db: %v", err)
+		return fmt.Errorf("failed to connect to db: %w", err)
 	}
 	defer store.Close()
 
@@ -37,6 +53,15 @@ func main() {
 		MaxPageBytes:   cfg.MaxPageBytes,
 		HostInterval:   cfg.HostInterval,
 	})
-	c.Run(cfg.Seeds)
+
+	err = c.Run(ctx, cfg.Seeds)
+	switch {
+	case errors.Is(err, context.Canceled):
+		fmt.Println("Crawl interrupted. URLs seen so far:", c.VisitedCount())
+		return nil
+	case err != nil:
+		return err
+	}
 	fmt.Println("Crawl complete. Total URLs visited:", c.VisitedCount())
+	return nil
 }
