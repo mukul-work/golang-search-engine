@@ -80,7 +80,7 @@ func TestFetch_TruncatesHugeBody(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	page, err := newTestFetcher(5*time.Second, testMaxBytes).Fetch(context.Background(), srv.URL)
+	page, err := newTestFetcher(5*time.Second, limit).Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
