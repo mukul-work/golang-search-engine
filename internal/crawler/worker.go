@@ -3,65 +3,47 @@ package crawler
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/mukul-work/golang-search-engine/internal/indexer"
 	"golang.org/x/net/html"
 )
 
-func (c *Crawler) fetchUrl(ctx context.Context, url string, workerNum int) ([]string, error) {
-	// context.Background() is temporary: the graceful-shutdown step threads a real ctx through.
-	// page, err := c.fetcher.Fetch(context.Background(), url)
+func (c *Crawler) fetchUrl(ctx context.Context, log *slog.Logger, url string) ([]string, error) {
 	page, err := c.fetcher.Fetch(ctx, url)
 	if err != nil {
-		return nil, fmt.Errorf("error while fetching the page data for '%s': %w", url, err)
+		return nil, fmt.Errorf("fetch: %w", err)
 	}
-
-	fmt.Printf("Worker: %d Trying to visit: %s\n", workerNum, url)
-	fmt.Printf("Worker: %d Content Type: %s\n", workerNum, page.ContentType)
-	fmt.Printf("Worker: %d Status Code: %d\n", workerNum, page.StatusCode)
+	log.Debug("fetched", "status", page.StatusCode, "content_type", page.ContentType)
 
 	doc, err := html.Parse(strings.NewReader(page.Body))
 	if err != nil {
-		return nil, fmt.Errorf("Problem while parsing the HTML before passing it into the GetHTMLData: %w", err)
+		return nil, fmt.Errorf("parse html: %w", err)
 	}
-
 	links, err := GetHTMLData(doc, url)
 	if err != nil {
-		return nil, fmt.Errorf("Problem while parsing the HTML: %w", err)
+		return nil, fmt.Errorf("extract links: %w", err)
 	}
-
 	text, err := GetPageText(doc)
 	if err != nil {
-		return nil, fmt.Errorf("Problem extracting text: %w", err)
+		return nil, fmt.Errorf("extract text: %w", err)
 	}
 
 	wordCounts := indexer.Tokenize(text)
 	total := 0
-	for _, c := range wordCounts {
-		total += c
+	for _, n := range wordCounts {
+		total += n
 	}
 	title, err := GetPageTitle(doc)
 	if err != nil {
-		return nil, fmt.Errorf("Problem extracting title: %w", err)
+		return nil, fmt.Errorf("extract title: %w", err)
 	}
-
 	if err := c.store.IndexPage(ctx, wordCounts, url, title, text, total); err != nil {
-		return nil, fmt.Errorf("Failed to insert into the database: %w", err)
+		return nil, fmt.Errorf("index page: %w", err)
 	}
-
-	// pageID, err := db.InsertPage(context.Background(), url, title, text, total)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("Failed to insert page: %w", err)
-	// }
-
-	// if err := db.InsertWordEntries(context.Background(), pageID, wordCounts); err != nil {
-	// 	return nil, fmt.Errorf("Failed to insert word entries: %w", err)
-	// }
-
 	return links, nil
-
 }
 
 func (c *Crawler) worker(ctx context.Context, num int) {
@@ -73,47 +55,58 @@ func (c *Crawler) worker(ctx context.Context, num int) {
 func (c *Crawler) process(ctx context.Context, workerNum int, url string) {
 	defer c.wg.Done() // exactly one Done per dequeued URL, on every return path
 
-	// After a cancel, workers keep receiving only to drain the queue so the
-	// WaitGroup reaches zero. Skip the work.
+	// After a cancel, workers keep receiving only to drain the queue. Skip the work.
 	if ctx.Err() != nil {
 		return
 	}
+
+	log := c.logger.With("worker", workerNum, "url", url)
+
 	allowed, err := c.robots.Allowed(ctx, url)
 	if err != nil {
-		if ctx.Err() == nil { // stay quiet about errors caused by shutdown
-			fmt.Printf("Worker: %d Error while working with robots.txt: %v\n", workerNum, err)
+		if ctx.Err() == nil { // errors caused by shutdown are not failures
+			c.failed.Add(1)
+			log.Warn("robots.txt check failed", "err", err)
 		}
 		return
 	}
 	if !allowed {
-		fmt.Printf("Worker: %d Skipping (robots.txt disallows): %s\n", workerNum, url)
+		c.disallowed.Add(1)
+		log.Debug("skipped: disallowed by robots.txt")
 		return
 	}
-	if err := c.limiter.Wait(ctx, url); err != nil {
-		if ctx.Err() == nil {
-			fmt.Printf("Worker: %d Rate limiter error: %v\n", workerNum, err)
-		}
-		return
-	}
-	links, err := c.fetchUrl(ctx, url, workerNum)
+
+	waited, err := c.limiter.Wait(ctx, url)
 	if err != nil {
 		if ctx.Err() == nil {
-			log.Printf("Worker: %d %v\n", workerNum, err)
+			c.failed.Add(1)
+			log.Warn("rate limiter failed", "err", err)
 		}
 		return
 	}
+	if waited > 10*time.Millisecond {
+		log.Debug("waited for rate limit", "waited", waited)
+	}
+
+	start := time.Now()
+	links, err := c.fetchUrl(ctx, log, url)
+	if err != nil {
+		if ctx.Err() == nil {
+			c.failed.Add(1)
+			log.Warn("crawl failed", "err", err)
+		}
+		return
+	}
+	c.indexed.Add(1)
 	if ctx.Err() != nil { // don't queue children of a page we are abandoning
 		return
 	}
 
-	fmt.Printf("Worker: %d List of links for '%s':\n\n", workerNum, url)
+	newLinks := 0
 	for _, link := range links {
-		fmt.Printf("Worker: %d Link before checking in the visited Set: %s\n", workerNum, link)
 		if c.enqueue(link) {
-			fmt.Printf("Worker: %d Link pushed to visited set\n\n", workerNum)
-		} else {
-			fmt.Printf("Worker: %d Link already in visited set\n\n", workerNum)
+			newLinks++
 		}
 	}
-	fmt.Printf("Worker: %d Visited URL: %s\n\n\n\n", workerNum, url)
+	log.Info("page crawled", "links", len(links), "new_links", newLinks, "took", time.Since(start))
 }

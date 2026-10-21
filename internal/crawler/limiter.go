@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"sync"
 	"time"
@@ -35,18 +34,29 @@ func (hl *HostLimiter) getLimiter(host string) *rate.Limiter {
 	return lim
 }
 
-func (hl *HostLimiter) Wait(ctx context.Context, rawURL string) error {
+// func (hl *HostLimiter) Wait(ctx context.Context, rawURL string) error {
+// 	u, err := url.Parse(rawURL)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	lim := hl.getLimiter(u.Host)
+// 	start := time.Now()
+// 	err = lim.Wait(ctx)
+// 	elapsed := time.Since(start)
+
+//		if elapsed > 10*time.Millisecond { // only log if it actually waited
+//			fmt.Printf("[RateLimiter] Waited %v for host: %s\n", elapsed, u.Host)
+//		}
+//		return err
+//	}
+
+// Wait blocks until the host's limiter allows a request and returns how long it waited.
+func (hl *HostLimiter) Wait(ctx context.Context, rawURL string) (time.Duration, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	lim := hl.getLimiter(u.Host)
 	start := time.Now()
-	err = lim.Wait(ctx)
-	elapsed := time.Since(start)
-
-	if elapsed > 10*time.Millisecond { // only log if it actually waited
-		fmt.Printf("[RateLimiter] Waited %v for host: %s\n", elapsed, u.Host)
-	}
-	return err
+	err = hl.getLimiter(u.Host).Wait(ctx)
+	return time.Since(start), err
 }

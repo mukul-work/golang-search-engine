@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -20,6 +21,8 @@ type Config struct {
 	RequestTimeout time.Duration
 	MaxPageBytes   int64
 	HostInterval   time.Duration // minimum gap between requests to one host; 0 = no limit
+	LogLevel       slog.Level
+	LogFormat      string // "text" or "json"
 }
 
 // DatabaseURL has no default: it must be provided.
@@ -34,6 +37,8 @@ func Default() Config {
 		RequestTimeout: 10 * time.Second,
 		MaxPageBytes:   5 << 20,
 		HostInterval:   time.Second,
+		LogLevel:       slog.LevelInfo,
+		LogFormat:      "text",
 	}
 }
 
@@ -84,6 +89,15 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		cfg.Seeds = splitList(v)
 	}
 
+	if v := getenv("LOG_LEVEL"); v != "" {
+		if err := cfg.LogLevel.UnmarshalText([]byte(v)); err != nil {
+			return Config{}, fmt.Errorf("LOG_LEVEL: %w", err)
+		}
+	}
+	if v := getenv("LOG_FORMAT"); v != "" {
+		cfg.LogFormat = v
+	}
+
 	// 2. Flags override the environment. The current values become the flag
 	// defaults, so a flag only wins when it is actually passed.
 	fs := flag.NewFlagSet("crawler", flag.ContinueOnError)
@@ -93,11 +107,13 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.DurationVar(&cfg.RequestTimeout, "timeout", cfg.RequestTimeout, "timeout per HTTP request")
 	fs.DurationVar(&cfg.HostInterval, "host-interval", cfg.HostInterval, "minimum gap between requests to the same host (0 = no limit)")
 	fs.Int64Var(&cfg.MaxPageBytes, "max-page-bytes", cfg.MaxPageBytes, "maximum bytes read per page")
+	fs.TextVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn or error")
+	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
 	cfg.Seeds = splitList(seeds)
-
+	cfg.LogFormat = strings.ToLower(cfg.LogFormat)
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -123,6 +139,9 @@ func (c Config) validate() error {
 	}
 	if len(c.Seeds) == 0 {
 		errs = append(errs, errors.New("at least one seed URL is required"))
+	}
+	if c.LogFormat != "text" && c.LogFormat != "json" {
+		errs = append(errs, fmt.Errorf("log format must be text or json, got %q", c.LogFormat))
 	}
 	for _, s := range c.Seeds {
 		u, err := url.Parse(s)

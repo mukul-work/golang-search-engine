@@ -15,6 +15,8 @@ func NewVisitedSet() *VisitedSet {
 }
 
 func (v *VisitedSet) Count() int {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	return len(v.visited)
 }
 
