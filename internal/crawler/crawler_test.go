@@ -1,12 +1,16 @@
 package crawler
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,6 +27,10 @@ func testOptions() Options {
 
 type fakeFetcher struct {
 	pages map[string]string // url -> HTML; unknown URLs fail
+}
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 func (f *fakeFetcher) Fetch(_ context.Context, url string) (*Page, error) {
@@ -46,7 +54,7 @@ func (f *fakeIndexer) IndexPage(_ context.Context, _ map[string]int, url, _, _ s
 }
 
 func TestEnqueue_RejectsDuplicates(t *testing.T) {
-	c := New(nil, testOptions())
+	c := New(nil, discardLogger(), testOptions())
 
 	if !c.enqueue("https://example.com/a") {
 		t.Error("first enqueue should be accepted")
@@ -60,7 +68,7 @@ func TestEnqueue_RejectsDuplicates(t *testing.T) {
 }
 
 func TestEnqueue_WaitGroupMatchesAcceptedURLs(t *testing.T) {
-	c := New(nil, testOptions())
+	c := New(nil, discardLogger(), testOptions())
 	c.enqueue("https://example.com/a")
 	c.enqueue("https://example.com/a") // duplicate: must NOT touch the counter
 	c.enqueue("https://example.com/b")
@@ -112,7 +120,7 @@ func TestRun_CrawlsDiscoveredLinks(t *testing.T) {
 	seed, next := srv.URL+"/", srv.URL+"/a"
 
 	idx := &fakeIndexer{}
-	c := New(idx, testOptions())
+	c := New(idx, discardLogger(), testOptions())
 	c.fetcher = &fakeFetcher{pages: map[string]string{
 		seed: `<html><head><title>Home</title></head><body>hello <a href="/a">a</a></body></html>`,
 		next: `<html><body>second page</body></html>`,
@@ -132,7 +140,7 @@ func TestRun_CrawlsDiscoveredLinks(t *testing.T) {
 func TestRun_FetchErrorStillFinishes(t *testing.T) {
 	srv := newRobotsServer(t)
 	idx := &fakeIndexer{}
-	c := New(idx, testOptions())
+	c := New(idx, discardLogger(), testOptions())
 	c.fetcher = &fakeFetcher{} // knows no pages, so every Fetch fails
 
 	runWithTimeout(t, c, []string{srv.URL + "/missing"})
@@ -160,7 +168,7 @@ func (b *blockingFetcher) Fetch(ctx context.Context, _ string) (*Page, error) {
 func TestRun_CancelStopsTheCrawl(t *testing.T) {
 	srv := newRobotsServer(t)
 	idx := &fakeIndexer{}
-	c := New(idx, testOptions()) // 2 workers
+	c := New(idx, discardLogger(), testOptions()) // 2 workers
 	bf := &blockingFetcher{started: make(chan struct{}, 1)}
 	c.fetcher = bf
 
@@ -189,5 +197,57 @@ func TestRun_CancelStopsTheCrawl(t *testing.T) {
 	}
 	if len(idx.urls) != 0 {
 		t.Errorf("indexed %v, want nothing", idx.urls)
+	}
+}
+
+func newDisallowAllServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			w.Write([]byte("User-agent: *\nDisallow: /\n"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestRun_RobotsDisallowedIsCountedNotIndexed(t *testing.T) {
+	srv := newDisallowAllServer(t)
+	seed := srv.URL + "/"
+
+	idx := &fakeIndexer{}
+	c := New(idx, discardLogger(), testOptions())
+	c.fetcher = &fakeFetcher{pages: map[string]string{seed: "<html><body>hi</body></html>"}}
+
+	runWithTimeout(t, c, []string{seed})
+
+	if s := c.Stats(); s.Disallowed != 1 || s.Indexed != 0 || s.Failed != 0 {
+		t.Errorf("stats = %+v, want disallowed=1 only", s)
+	}
+	if len(idx.urls) != 0 {
+		t.Errorf("indexed %v, want nothing", idx.urls)
+	}
+}
+
+func TestRun_LogsEachCrawledPage(t *testing.T) {
+	srv := newRobotsServer(t)
+	seed := srv.URL + "/"
+
+	var buf bytes.Buffer
+	c := New(&fakeIndexer{}, slog.New(slog.NewTextHandler(&buf, nil)), testOptions())
+	c.fetcher = &fakeFetcher{pages: map[string]string{seed: "<html><body>hi</body></html>"}}
+
+	runWithTimeout(t, c, []string{seed})
+
+	out := buf.String()
+	for _, want := range []string{"crawl started", "page crawled", "crawl finished"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log output missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "level=DEBUG") {
+		t.Errorf("debug records appeared at the default info level:\n%s", out)
 	}
 }

@@ -8,16 +8,16 @@ import (
 
 func TestHostLimiter_SpacesRequestsToSameHost(t *testing.T) {
 	hl := NewHostLimiter(200 * time.Millisecond)
-	if err := hl.Wait(context.Background(), "http://a.test/1"); err != nil { // uses the burst token: instant
+	if _, err := hl.Wait(context.Background(), "http://a.test/1"); err != nil { // burst token: instant
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	start := time.Now()
-	if err := hl.Wait(context.Background(), "http://a.test/2"); err != nil {
+	waited, err := hl.Wait(context.Background(), "http://a.test/2")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if elapsed := time.Since(start); elapsed < 150*time.Millisecond {
-		t.Errorf("second request waited %v, want about 200ms", elapsed)
+	if waited < 150*time.Millisecond {
+		t.Errorf("second request waited %v, want about 200ms", waited)
 	}
 }
 
@@ -46,7 +46,7 @@ func TestHostLimiter_ZeroIntervalDoesNotLimit(t *testing.T) {
 
 func TestHostLimiter_WaitStopsWhenContextCancelled(t *testing.T) {
 	hl := NewHostLimiter(time.Hour)
-	if err := hl.Wait(context.Background(), "http://a.test/1"); err != nil { // burst token: instant
+	if _, err := hl.Wait(context.Background(), "http://a.test/1"); err != nil { // burst token: instant
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestHostLimiter_WaitStopsWhenContextCancelled(t *testing.T) {
 	time.AfterFunc(50*time.Millisecond, cancel)
 
 	start := time.Now()
-	err := hl.Wait(ctx, "http://a.test/2") // would otherwise block for an hour
+	_, err := hl.Wait(ctx, "http://a.test/2") // would otherwise block for an hour
 	if err == nil {
 		t.Fatal("expected an error after cancel, got nil")
 	}

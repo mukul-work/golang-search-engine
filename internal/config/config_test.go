@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"reflect"
 	"testing"
 	"time"
@@ -89,6 +90,9 @@ func TestLoad_Errors(t *testing.T) {
 		{"negative interval", []string{"-host-interval=-1s"}, map[string]string{"DB_URL": dbURL}},
 		{"non-http seed", []string{"-seeds=ftp://a.test"}, map[string]string{"DB_URL": dbURL}},
 		{"seed without host", []string{"-seeds=https://"}, map[string]string{"DB_URL": dbURL}},
+		{"bad log level in env", nil, map[string]string{"DB_URL": dbURL, "LOG_LEVEL": "loud"}},
+		{"bad log level flag", []string{"-log-level=loud"}, map[string]string{"DB_URL": dbURL}},
+		{"bad log format", []string{"-log-format=xml"}, map[string]string{"DB_URL": dbURL}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -96,5 +100,28 @@ func TestLoad_Errors(t *testing.T) {
 				t.Error("expected an error, got nil")
 			}
 		})
+	}
+}
+
+func TestLoad_LoggingFromEnv(t *testing.T) {
+	cfg, err := Load(nil, env(map[string]string{"DB_URL": dbURL, "LOG_LEVEL": "debug", "LOG_FORMAT": "JSON"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("LogLevel = %v, want debug", cfg.LogLevel)
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("LogFormat = %q, want json (lowercased)", cfg.LogFormat)
+	}
+}
+
+func TestLoad_LogLevelFlagOverridesEnv(t *testing.T) {
+	cfg, err := Load([]string{"-log-level=warn"}, env(map[string]string{"DB_URL": dbURL, "LOG_LEVEL": "debug"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.LogLevel != slog.LevelWarn {
+		t.Errorf("LogLevel = %v, want warn", cfg.LogLevel)
 	}
 }
