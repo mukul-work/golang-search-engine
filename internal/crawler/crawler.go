@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/mukul-work/golang-search-engine/internal/urlnorm"
 )
 
 type Options struct {
@@ -69,12 +71,20 @@ func (c *Crawler) Stats() Stats {
 	}
 }
 
-func (c *Crawler) enqueue(url string) bool {
-	if c.visited.IsVisited(url) {
+// enqueue normalizes raw and queues it unless it is unusable or already seen.
+// It is the only place that increments the WaitGroup, so every queued URL
+// gets exactly one Done.
+func (c *Crawler) enqueue(raw string) bool {
+	u, err := urlnorm.Normalize(raw)
+	if err != nil {
+		c.logger.Debug("dropped unusable URL", "url", raw, "err", err)
+		return false
+	}
+	if c.visited.IsVisited(u) {
 		return false
 	}
 	c.wg.Add(1)
-	c.frontier.Push(url)
+	c.frontier.Push(u)
 	return true
 }
 
