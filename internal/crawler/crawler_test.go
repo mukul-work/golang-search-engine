@@ -251,3 +251,69 @@ func TestRun_LogsEachCrawledPage(t *testing.T) {
 		t.Errorf("debug records appeared at the default info level:\n%s", out)
 	}
 }
+
+func TestEnqueue_NormalizesBeforeDedup(t *testing.T) {
+	c := New(nil, discardLogger(), testOptions())
+
+	if !c.enqueue("https://example.com/a#x") {
+		t.Error("first spelling should be accepted")
+	}
+	if c.enqueue("HTTPS://EXAMPLE.COM:443/a?utm_source=mail") {
+		t.Error("same page under another spelling should be rejected")
+	}
+	if got := c.VisitedCount(); got != 1 {
+		t.Errorf("VisitedCount = %d, want 1", got)
+	}
+}
+
+func TestEnqueue_RejectsUnusableURLs(t *testing.T) {
+	c := New(nil, discardLogger(), testOptions())
+	for _, raw := range []string{"mailto:a@b.com", "javascript:void(0)", "tel:+123456", "ftp://example.com/f", "/relative", ""} {
+		if c.enqueue(raw) {
+			t.Errorf("enqueue(%q) = true, want false", raw)
+		}
+	}
+	if got := c.VisitedCount(); got != 0 {
+		t.Errorf("VisitedCount = %d, want 0: junk must not enter the visited set", got)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("WaitGroup is non-zero: a rejected URL was counted")
+	}
+}
+
+func TestRun_VariantLinksAreCrawledOnce(t *testing.T) {
+	srv := newRobotsServer(t)
+	seed := srv.URL // no trailing slash on purpose: normalized to srv.URL + "/"
+	home, a := srv.URL+"/", srv.URL+"/a"
+
+	idx := &fakeIndexer{}
+	c := New(idx, discardLogger(), testOptions())
+	c.fetcher = &fakeFetcher{pages: map[string]string{
+		home: `<html><body>
+			<a href="/a#top">1</a>
+			<a href="/a?utm_source=mail">2</a>
+			<a href="/a">3</a>
+			<a href="mailto:x@y.z">4</a>
+			<a href="javascript:void(0)">5</a>
+		</body></html>`,
+		a: `<html><body>second page</body></html>`,
+	}}
+
+	runWithTimeout(t, c, []string{seed})
+
+	sort.Strings(idx.urls)
+	if want := []string{home, a}; !reflect.DeepEqual(idx.urls, want) {
+		t.Errorf("indexed %v, want %v", idx.urls, want)
+	}
+	if s := c.Stats(); s.Seen != 2 || s.Indexed != 2 || s.Failed != 0 {
+		t.Errorf("stats = %+v, want seen=2 indexed=2 failed=0", s)
+	}
+}
