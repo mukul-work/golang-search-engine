@@ -54,7 +54,7 @@ func extractText(sb *strings.Builder, node *html.Node) {
 		text := strings.TrimSpace(node.Data)
 		if text != "" {
 			sb.WriteString(text)
-			sb.WriteString("")
+			sb.WriteString(" ")
 		}
 	}
 	for child := node.FirstChild; child != nil; child = child.NextSibling {
@@ -69,7 +69,7 @@ func GetPageText(node *html.Node) (string, error) {
 	// }
 	var sb strings.Builder
 	extractText(&sb, node)
-	return sb.String(), nil
+	return strings.TrimSpace(sb.String()), nil
 }
 
 func extractTitle(node *html.Node, title *string, found *bool) {
