@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,41 +15,58 @@ import (
 )
 
 func main() {
-	limit := flag.Int("n", 10, "max results")
+	log.SetFlags(0) // plain messages: a CLI doesn't need timestamps
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
+	perPage := flag.Int("n", search.DefaultPerPage, "results per page")
+	page := flag.Int("page", 1, "page number, starting at 1")
 	flag.Parse()
 
 	q := strings.Join(flag.Args(), " ")
 	if q == "" {
-		fmt.Fprintln(os.Stderr, "usage: search [-n 10] <query>")
-		os.Exit(1)
+		return errors.New("usage: search [-n 10] [-page 1] <query>")
 	}
 
 	if err := config.LoadDotEnv(".env.local"); err != nil {
-		log.Fatalf("loading .env.local: %v", err)
+		return fmt.Errorf("loading .env.local: %w", err)
 	}
-
-	// create a db pool
 	dbURL := os.Getenv("DB_URL")
 	if dbURL == "" {
-		log.Fatal("DB_URL is required")
+		return errors.New("DB_URL is required")
 	}
+
 	ctx := context.Background()
 	store, err := db.New(ctx, dbURL)
 	if err != nil {
-		log.Fatalf("failed to connect to db: %v", err)
+		return fmt.Errorf("failed to connect to db: %w", err)
 	}
 	defer store.Close()
 
-	svc := search.NewService(store)
-	results, err := svc.Query(ctx, q, *limit)
+	res, err := search.NewService(store).Query(ctx, q, *page, *perPage)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "search failed:", err)
-		os.Exit(1)
+		return fmt.Errorf("search failed: %w", err)
 	}
-	if len(results) == 0 {
-		fmt.Print("Empty result set\n")
+	printResults(res)
+	return nil
+}
+
+func printResults(res search.Results) {
+	if res.Total == 0 {
+		fmt.Println("No results")
+		return
 	}
-	for i, r := range results {
-		fmt.Printf("%d. %s\n   %s\n   %s\n   %f\n\n", i+1, r.Title, r.URL, r.Snippet, r.Score)
+	if len(res.Items) == 0 {
+		fmt.Printf("Page %d is past the end: %d results fit on %d pages\n", res.Page, res.Total, res.TotalPages())
+		return
 	}
+	first := (res.Page-1)*res.PerPage + 1 // rank of the first result on this page
+	for i, r := range res.Items {
+		fmt.Printf("%d. %s\n   %s\n   %s\n   %f\n\n", first+i, r.Title, r.URL, r.Snippet, r.Score)
+	}
+	fmt.Printf("Results %d-%d of %d (page %d of %d)\n",
+		first, first+len(res.Items)-1, res.Total, res.Page, res.TotalPages())
 }
