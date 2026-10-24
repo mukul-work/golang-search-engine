@@ -1,3 +1,6 @@
+> **Note:** The current README describes V1 and doesn't reflect the project's current state. I'll be updating it to cover the changes in V2 shortly.
+
+
 # Golang Search Engine
 
 A search engine built from scratch in Go: a concurrent web crawler, an indexer that builds an inverted index in PostgreSQL, and a CLI query engine that ranks results by term frequency.
