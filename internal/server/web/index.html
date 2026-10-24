@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{if .Query}}{{.Query}} - {{end}}Search</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1><a href="/">Search</a></h1>
+    <form action="/" method="get" role="search">
+      <input type="search" name="q" value="{{.Query}}" placeholder="Search the index" maxlength="256" autofocus aria-label="Search query">
+      <button type="submit">Search</button>
+    </form>
+  </header>
+
+  {{if .Error}}
+    <p class="notice error" role="alert">{{.Error}}</p>
+  {{else if .Searched}}
+    {{if .PastEnd}}
+      <p class="notice">There is no page {{.Page}}. {{.Total}} results fit on {{.TotalPages}} pages.
+        <a href="{{.LastURL}}">Go to the last page</a></p>
+    {{else if .Results}}
+      <p class="summary">Results {{.From}}-{{.To}} of {{.Total}}</p>
+      <ol class="results" start="{{.From}}">
+        {{range .Results}}
+        <li>
+          <h2><a href="{{.URL}}" rel="noopener noreferrer">{{template "segments" .Title}}</a></h2>
+          <p class="url">{{.URL}}</p>
+          <p class="snippet">{{template "segments" .Snippet}}</p>
+        </li>
+        {{end}}
+      </ol>
+      {{if or .HasPrev .HasNext}}
+      <nav class="pager" aria-label="Pages">
+        {{if .HasPrev}}<a rel="prev" href="{{.PrevURL}}">&larr; Previous</a>{{end}}
+        <span>Page {{.Page}} of {{.TotalPages}}</span>
+        {{if .HasNext}}<a rel="next" href="{{.NextURL}}">Next &rarr;</a>{{end}}
+      </nav>
+      {{end}}
+    {{else}}
+      <p class="notice">No results for <strong>{{.Query}}</strong>.</p>
+    {{end}}
+  {{end}}
+</main>
+</body>
+</html>
+{{define "segments"}}{{range .}}{{if .Match}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}{{end}}
