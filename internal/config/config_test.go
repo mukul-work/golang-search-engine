@@ -93,6 +93,11 @@ func TestLoad_Errors(t *testing.T) {
 		{"bad log level in env", nil, map[string]string{"DB_URL": dbURL, "LOG_LEVEL": "loud"}},
 		{"bad log level flag", []string{"-log-level=loud"}, map[string]string{"DB_URL": dbURL}},
 		{"bad log format", []string{"-log-format=xml"}, map[string]string{"DB_URL": dbURL}},
+		{"negative max depth", []string{"-max-depth=-1"}, map[string]string{"DB_URL": dbURL}},
+		{"max depth not a number", nil, map[string]string{"DB_URL": dbURL, "CRAWLER_MAX_DEPTH": "deep"}},
+		{"zero max pages", []string{"-max-pages=0"}, map[string]string{"DB_URL": dbURL}},
+		{"allowed host with scheme", []string{"-allowed-hosts=https://a.test"}, map[string]string{"DB_URL": dbURL}},
+		{"allowed host with port", []string{"-allowed-hosts=a.test:8080"}, map[string]string{"DB_URL": dbURL}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -123,5 +128,52 @@ func TestLoad_LogLevelFlagOverridesEnv(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelWarn {
 		t.Errorf("LogLevel = %v, want warn", cfg.LogLevel)
+	}
+}
+
+func TestLoad_ScopeFromEnv(t *testing.T) {
+	cfg, err := Load(nil, env(map[string]string{
+		"DB_URL":                dbURL,
+		"CRAWLER_MAX_DEPTH":     "3",
+		"CRAWLER_MAX_PAGES":     "50",
+		"CRAWLER_ALLOWED_HOSTS": "Example.COM, b.test",
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxDepth != 3 || cfg.MaxPages != 50 {
+		t.Errorf("depth=%d pages=%d, want 3 and 50", cfg.MaxDepth, cfg.MaxPages)
+	}
+	if want := []string{"example.com", "b.test"}; !reflect.DeepEqual(cfg.AllowedHosts, want) {
+		t.Errorf("AllowedHosts = %v, want %v (lowercased, trimmed)", cfg.AllowedHosts, want)
+	}
+}
+
+func TestLoad_ScopeFlagsOverrideEnv(t *testing.T) {
+	cfg, err := Load(
+		[]string{"-max-depth=0", "-max-pages=10", "-allowed-hosts=c.test"},
+		env(map[string]string{"DB_URL": dbURL, "CRAWLER_MAX_DEPTH": "3", "CRAWLER_ALLOWED_HOSTS": "a.test"}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.MaxDepth != 0 { // zero is valid: seeds only
+		t.Errorf("MaxDepth = %d, want 0", cfg.MaxDepth)
+	}
+	if cfg.MaxPages != 10 {
+		t.Errorf("MaxPages = %d, want 10", cfg.MaxPages)
+	}
+	if want := []string{"c.test"}; !reflect.DeepEqual(cfg.AllowedHosts, want) {
+		t.Errorf("AllowedHosts = %v, want %v", cfg.AllowedHosts, want)
+	}
+}
+
+func TestLoad_EmptyAllowedHostsFlagClearsEnv(t *testing.T) {
+	cfg, err := Load([]string{"-allowed-hosts="}, env(map[string]string{"DB_URL": dbURL, "CRAWLER_ALLOWED_HOSTS": "a.test"}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.AllowedHosts) != 0 {
+		t.Errorf("AllowedHosts = %v, want none", cfg.AllowedHosts)
 	}
 }

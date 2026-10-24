@@ -7,9 +7,9 @@ import (
 
 func TestFrontier_CloseEndsReceivers(t *testing.T) {
 	f := NewFrontier()
-	f.Push("a")
-	if got := <-f.out; got != "a" {
-		t.Fatalf("got %q, want %q", got, "a")
+	f.Push(Task{URL: "a", Depth: 3})
+	if got := <-f.out; got != (Task{URL: "a", Depth: 3}) {
+		t.Fatalf("got %+v, want the pushed task with its depth", got)
 	}
 
 	f.Close()

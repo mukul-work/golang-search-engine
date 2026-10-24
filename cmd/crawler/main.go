@@ -56,6 +56,9 @@ func run() error {
 		RequestTimeout: cfg.RequestTimeout,
 		MaxPageBytes:   cfg.MaxPageBytes,
 		HostInterval:   cfg.HostInterval,
+		MaxDepth:       cfg.MaxDepth,
+		MaxPages:       cfg.MaxPages,
+		AllowedHosts:   cfg.AllowedHosts,
 	})
 
 	// Run logs its own summary. A cancelled crawl is a normal exit, not an error.

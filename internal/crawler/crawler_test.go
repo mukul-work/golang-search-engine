@@ -22,6 +22,8 @@ func testOptions() Options {
 		RequestTimeout: time.Second,
 		MaxPageBytes:   1 << 20,
 		HostInterval:   0, // no rate limiting: tests don't need to wait
+		MaxDepth:       5,
+		MaxPages:       1000,
 	}
 }
 
@@ -56,10 +58,10 @@ func (f *fakeIndexer) IndexPage(_ context.Context, _ map[string]int, url, _, _ s
 func TestEnqueue_RejectsDuplicates(t *testing.T) {
 	c := New(nil, discardLogger(), testOptions())
 
-	if !c.enqueue("https://example.com/a") {
+	if !c.enqueue("https://example.com/a", 0) {
 		t.Error("first enqueue should be accepted")
 	}
-	if c.enqueue("https://example.com/a") {
+	if c.enqueue("https://example.com/a", 0) {
 		t.Error("duplicate enqueue should be rejected")
 	}
 	if got := c.VisitedCount(); got != 1 {
@@ -69,9 +71,9 @@ func TestEnqueue_RejectsDuplicates(t *testing.T) {
 
 func TestEnqueue_WaitGroupMatchesAcceptedURLs(t *testing.T) {
 	c := New(nil, discardLogger(), testOptions())
-	c.enqueue("https://example.com/a")
-	c.enqueue("https://example.com/a") // duplicate: must NOT touch the counter
-	c.enqueue("https://example.com/b")
+	c.enqueue("https://example.com/a", 0)
+	c.enqueue("https://example.com/a", 0) // duplicate: must NOT touch the counter
+	c.enqueue("https://example.com/b", 0)
 
 	done := make(chan struct{})
 	go func() {
@@ -255,10 +257,10 @@ func TestRun_LogsEachCrawledPage(t *testing.T) {
 func TestEnqueue_NormalizesBeforeDedup(t *testing.T) {
 	c := New(nil, discardLogger(), testOptions())
 
-	if !c.enqueue("https://example.com/a#x") {
+	if !c.enqueue("https://example.com/a#x", 0) {
 		t.Error("first spelling should be accepted")
 	}
-	if c.enqueue("HTTPS://EXAMPLE.COM:443/a?utm_source=mail") {
+	if c.enqueue("HTTPS://EXAMPLE.COM:443/a?utm_source=mail", 0) {
 		t.Error("same page under another spelling should be rejected")
 	}
 	if got := c.VisitedCount(); got != 1 {
@@ -269,7 +271,7 @@ func TestEnqueue_NormalizesBeforeDedup(t *testing.T) {
 func TestEnqueue_RejectsUnusableURLs(t *testing.T) {
 	c := New(nil, discardLogger(), testOptions())
 	for _, raw := range []string{"mailto:a@b.com", "javascript:void(0)", "tel:+123456", "ftp://example.com/f", "/relative", ""} {
-		if c.enqueue(raw) {
+		if c.enqueue(raw, 0) {
 			t.Errorf("enqueue(%q) = true, want false", raw)
 		}
 	}
@@ -315,5 +317,108 @@ func TestRun_VariantLinksAreCrawledOnce(t *testing.T) {
 	}
 	if s := c.Stats(); s.Seen != 2 || s.Indexed != 2 || s.Failed != 0 {
 		t.Errorf("stats = %+v, want seen=2 indexed=2 failed=0", s)
+	}
+}
+
+func TestRun_MaxDepth(t *testing.T) {
+	srv := newRobotsServer(t)
+	home, a, b := srv.URL+"/", srv.URL+"/a", srv.URL+"/b"
+	pages := map[string]string{
+		home: `<html><body><a href="/a">a</a></body></html>`,
+		a:    `<html><body><a href="/b">b</a></body></html>`,
+		b:    `<html><body>end of the chain</body></html>`,
+	}
+
+	tests := []struct {
+		name  string
+		depth int
+		want  []string
+	}{
+		{"seeds only", 0, []string{home}},
+		{"one hop", 1, []string{home, a}},
+		{"two hops", 2, []string{home, a, b}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			idx := &fakeIndexer{}
+			opts := testOptions()
+			opts.MaxDepth = tc.depth
+			c := New(idx, discardLogger(), opts)
+			c.fetcher = &fakeFetcher{pages: pages}
+
+			runWithTimeout(t, c, []string{home})
+
+			sort.Strings(idx.urls)
+			if !reflect.DeepEqual(idx.urls, tc.want) {
+				t.Errorf("indexed %v, want %v", idx.urls, tc.want)
+			}
+		})
+	}
+}
+
+func TestRun_MaxPagesBudget(t *testing.T) {
+	srv := newRobotsServer(t)
+	home := srv.URL + "/"
+	pages := map[string]string{
+		home: `<html><body><a href="/a">a</a><a href="/b">b</a><a href="/c">c</a><a href="/d">d</a></body></html>`,
+	}
+	for _, p := range []string{"/a", "/b", "/c", "/d"} {
+		pages[srv.URL+p] = `<html><body>leaf</body></html>`
+	}
+
+	idx := &fakeIndexer{}
+	opts := testOptions()
+	opts.MaxPages = 3 // the seed plus two links
+	c := New(idx, discardLogger(), opts)
+	c.fetcher = &fakeFetcher{pages: pages}
+
+	runWithTimeout(t, c, []string{home})
+
+	if s := c.Stats(); s.Seen != 3 || s.Indexed != 3 || s.OutOfScope != 2 || s.Failed != 0 {
+		t.Errorf("stats = %+v, want seen=3 indexed=3 out_of_scope=2 failed=0", s)
+	}
+}
+
+func TestRun_AllowedHostsKeepsCrawlOnSite(t *testing.T) {
+	srv := newRobotsServer(t)
+	home, a := srv.URL+"/", srv.URL+"/a"
+
+	idx := &fakeIndexer{}
+	opts := testOptions()
+	opts.AllowedHosts = []string{"127.0.0.1"} // httptest servers listen on 127.0.0.1
+	c := New(idx, discardLogger(), opts)
+	c.fetcher = &fakeFetcher{pages: map[string]string{
+		home: `<html><body><a href="/a">a</a><a href="https://other.test/x">off site</a></body></html>`,
+		a:    `<html><body>second page</body></html>`,
+	}}
+
+	runWithTimeout(t, c, []string{home})
+
+	sort.Strings(idx.urls)
+	if want := []string{home, a}; !reflect.DeepEqual(idx.urls, want) {
+		t.Errorf("indexed %v, want %v", idx.urls, want)
+	}
+	// If the off-site link had been queued, the fake fetcher would fail on it.
+	if s := c.Stats(); s.Failed != 0 || s.OutOfScope != 1 {
+		t.Errorf("stats = %+v, want failed=0 out_of_scope=1", s)
+	}
+}
+
+func TestRun_ErrorsWhenNoSeedIsInScope(t *testing.T) {
+	opts := testOptions()
+	opts.AllowedHosts = []string{"allowed.test"}
+	c := New(&fakeIndexer{}, discardLogger(), opts)
+	c.fetcher = &fakeFetcher{}
+
+	errc := make(chan error, 1)
+	go func() { errc <- c.Run(context.Background(), []string{"https://other.test/"}) }()
+
+	select {
+	case err := <-errc:
+		if err == nil {
+			t.Error("expected an error when no seed is queued, got nil")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return")
 	}
 }
