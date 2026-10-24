@@ -35,12 +35,14 @@ func New(searcher Searcher, logger *slog.Logger) *Server {
 	s := &Server{searcher: searcher, logger: logger}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 
-	// logRequests is the outer layer so it sees the status code that
-	// recoverPanics writes after a panic.
-	s.handler = s.logRequests(s.recoverPanics(mux))
+	// secureHeaders is outermost so every response gets the headers, including
+	// 404s and 405s the mux writes itself.
+	s.handler = secureHeaders(s.logRequests(s.recoverPanics(mux)))
 	return s
 }
 
@@ -90,48 +92,84 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+var errMissingQuery = errors.New("missing query parameter: q")
+
+type searchParams struct {
+	q       string
+	page    int
+	perPage int
+}
+
+// parseParams reads and validates the query parameters shared by the JSON API
+// and the HTML page. On error it still returns the trimmed q, so the page can
+// show it back to the user. Messages are safe to show.
+func parseParams(r *http.Request) (searchParams, error) {
+	p := searchParams{q: strings.TrimSpace(r.URL.Query().Get("q"))}
 	switch {
-	case q == "":
-		writeError(w, http.StatusBadRequest, "missing query parameter: q")
-		return
-	case len(q) > maxQueryLen:
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("q must be at most %d bytes", maxQueryLen))
-		return
+	case p.q == "":
+		return p, errMissingQuery
+	case len(p.q) > maxQueryLen:
+		return p, fmt.Errorf("q must be at most %d bytes", maxQueryLen)
 	}
 
-	page, err := intParam(r, "page", 1)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	var err error
+	if p.page, err = intParam(r, "page", 1); err != nil {
+		return p, err
 	}
-	perPage, err := intParam(r, "per_page", search.DefaultPerPage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if p.perPage, err = intParam(r, "per_page", search.DefaultPerPage); err != nil {
+		return p, err
 	}
 	// Values above the maximums are not errors: the service clamps them and
-	// the response reports the page and per_page actually used.
+	// the response reports what was actually used.
+	return p, nil
+}
 
+// outcome is a finished search with failures already translated into an HTTP
+// status and a message that is safe to show people.
+type outcome struct {
+	res    search.Results
+	status int    // http.StatusOK on success
+	msg    string // user-facing message when status is not 200
+	gone   bool   // the client disconnected: write nothing
+}
+
+// runSearch queries with a timeout and classifies any failure. Both the JSON
+// API and the HTML page use it, so they can never disagree.
+func (s *Server) runSearch(r *http.Request, p searchParams) outcome {
 	ctx, cancel := context.WithTimeout(r.Context(), queryTimeout)
 	defer cancel()
 
-	res, err := s.searcher.Query(ctx, q, page, perPage)
+	res, err := s.searcher.Query(ctx, p.q, p.page, p.perPage)
+	switch {
+	case err == nil:
+		return outcome{res: res, status: http.StatusOK}
+	case r.Context().Err() != nil:
+		s.logger.Debug("client disconnected during search") // nobody is listening for a reply
+		return outcome{gone: true}
+	case errors.Is(err, context.DeadlineExceeded):
+		s.logger.Warn("search timed out", "timeout", queryTimeout)
+		return outcome{status: http.StatusServiceUnavailable, msg: "Search timed out. Please try again."}
+	default:
+		s.logger.Error("search failed", "err", err) // details go to the log, never to the client
+		return outcome{status: http.StatusInternalServerError, msg: "Something went wrong on our side."}
+	}
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	p, err := parseParams(r)
 	if err != nil {
-		switch {
-		case r.Context().Err() != nil:
-			s.logger.Debug("client disconnected during search") // nobody is listening for a reply
-		case errors.Is(err, context.DeadlineExceeded):
-			s.logger.Warn("search timed out", "timeout", queryTimeout)
-			writeError(w, http.StatusServiceUnavailable, "search timed out, try again")
-		default:
-			s.logger.Error("search failed", "err", err) // details go to the log, not to the client
-			writeError(w, http.StatusInternalServerError, "internal error")
-		}
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, newSearchResponse(res))
+	out := s.runSearch(r, p)
+	switch {
+	case out.gone:
+		return
+	case out.status != http.StatusOK:
+		writeError(w, out.status, out.msg)
+	default:
+		writeJSON(w, http.StatusOK, newSearchResponse(out.res))
+	}
 }
 
 // intParam reads an optional positive-integer query parameter.
@@ -215,6 +253,19 @@ func (s *Server) recoverPanics(next http.Handler) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// secureHeaders adds browser-facing protections to every response.
+func secureHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		// Pages may load only our own stylesheet and submit forms to ourselves.
+		h.Set("Content-Security-Policy",
+			"default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer") // our URLs contain what people searched for
 		next.ServeHTTP(w, r)
 	})
 }
