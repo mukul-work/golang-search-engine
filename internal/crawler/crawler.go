@@ -2,8 +2,11 @@ package crawler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -11,17 +14,25 @@ import (
 	"github.com/mukul-work/golang-search-engine/internal/urlnorm"
 )
 
+// PageIndexer is what the crawler needs from storage.
+type PageIndexer interface {
+	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
+}
+
+// Options are the tunable settings of a Crawler. The caller is expected to
+// pass validated values (config.Load validates them).
 type Options struct {
 	Workers        int
 	RequestTimeout time.Duration
 	MaxPageBytes   int64
 	HostInterval   time.Duration
+	MaxDepth       int      // link hops to follow from a seed; seeds are depth 0
+	MaxPages       int      // most distinct URLs to queue, seeds included; <= 0 means no budget
+	AllowedHosts   []string // empty means any host; an entry also allows its subdomains
 }
 
-type PageIndexer interface {
-	IndexPage(ctx context.Context, wordCounts map[string]int, url, title, content string, totalWords int) error
-}
-
+// Crawler owns everything a crawl needs. A Crawler runs once: Run closes
+// its frontier when the crawl finishes.
 type Crawler struct {
 	frontier *Frontier
 	visited  *VisitedSet
@@ -31,26 +42,41 @@ type Crawler struct {
 	store    PageIndexer
 	logger   *slog.Logger
 	workers  int
-	wg       sync.WaitGroup
+	wg       sync.WaitGroup // counts URLs that are queued or being processed
+
+	maxDepth     int
+	maxPages     int
+	allowedHosts []string
 
 	// outcome counters, updated by workers
-	indexed    atomic.Int64
-	failed     atomic.Int64
-	disallowed atomic.Int64
+	indexed      atomic.Int64
+	failed       atomic.Int64
+	disallowed   atomic.Int64
+	outOfScope   atomic.Int64
+	budgetLogged atomic.Bool
 }
 
 // New builds a Crawler. logger must not be nil.
 func New(store PageIndexer, logger *slog.Logger, opts Options) *Crawler {
 	client := &http.Client{Timeout: opts.RequestTimeout}
+
+	allowed := make([]string, len(opts.AllowedHosts))
+	for i, h := range opts.AllowedHosts {
+		allowed[i] = strings.ToLower(h)
+	}
+
 	return &Crawler{
-		frontier: NewFrontier(),
-		visited:  NewVisitedSet(),
-		robots:   NewRobotCache(client),
-		limiter:  NewHostLimiter(opts.HostInterval),
-		fetcher:  NewHTTPFetcher(client, opts.MaxPageBytes),
-		store:    store,
-		logger:   logger,
-		workers:  opts.Workers,
+		frontier:     NewFrontier(),
+		visited:      NewVisitedSet(opts.MaxPages),
+		robots:       NewRobotCache(client),
+		limiter:      NewHostLimiter(opts.HostInterval),
+		fetcher:      NewHTTPFetcher(client, opts.MaxPageBytes),
+		store:        store,
+		logger:       logger,
+		workers:      opts.Workers,
+		maxDepth:     opts.MaxDepth,
+		maxPages:     opts.MaxPages,
+		allowedHosts: allowed,
 	}
 }
 
@@ -60,6 +86,7 @@ type Stats struct {
 	Indexed    int // pages fetched and written to the store
 	Failed     int // URLs that errored (robots, fetch, parse or store)
 	Disallowed int // URLs skipped because robots.txt forbids them
+	OutOfScope int // link occurrences skipped by the depth, host or budget limits
 }
 
 func (c *Crawler) Stats() Stats {
@@ -68,48 +95,62 @@ func (c *Crawler) Stats() Stats {
 		Indexed:    int(c.indexed.Load()),
 		Failed:     int(c.failed.Load()),
 		Disallowed: int(c.disallowed.Load()),
+		OutOfScope: int(c.outOfScope.Load()),
 	}
 }
 
-// enqueue normalizes raw and queues it unless it is unusable or already seen.
-// It is the only place that increments the WaitGroup, so every queued URL
-// gets exactly one Done.
-func (c *Crawler) enqueue(raw string) bool {
+// enqueue queues raw at the given depth unless it is out of scope, unusable
+// or already seen. It is the only place that increments the WaitGroup, so
+// every queued URL gets exactly one Done, and the only place scope rules live.
+func (c *Crawler) enqueue(raw string, depth int) bool {
+	if depth > c.maxDepth { // cheapest check first
+		c.outOfScope.Add(1)
+		return false
+	}
 	u, err := urlnorm.Normalize(raw)
 	if err != nil {
 		c.logger.Debug("dropped unusable URL", "url", raw, "err", err)
 		return false
 	}
-	if c.visited.IsVisited(u) {
+	if len(c.allowedHosts) > 0 {
+		parsed, err := url.Parse(u)
+		if err != nil || !hostAllowed(parsed.Hostname(), c.allowedHosts) {
+			c.outOfScope.Add(1)
+			return false
+		}
+	}
+
+	switch c.visited.Add(u) {
+	case Duplicate:
+		return false
+	case OverLimit:
+		c.outOfScope.Add(1)
+		if c.budgetLogged.CompareAndSwap(false, true) { // log the first time only
+			c.logger.Info("page budget reached: no more URLs will be queued", "limit", c.maxPages)
+		}
 		return false
 	}
+
 	c.wg.Add(1)
-	c.frontier.Push(u)
+	c.frontier.Push(Task{URL: u, Depth: depth})
 	return true
 }
 
 // Run crawls from the seeds and blocks until no URLs remain or ctx is
-// cancelled. It returns ctx.Err(), so a non-nil result means the crawl was
-// cut short.
-// func (c *Crawler) Run(ctx context.Context, seeds []string) error {
-// 	for i := 0; i < c.workers; i++ {
-// 		go c.worker(ctx, i)
-// 	}
-// 	for _, seed := range seeds {
-// 		c.enqueue(seed)
-// 	}
-// 	c.wg.Wait() // after a cancel this still reaches zero: workers drain the queue
-// 	c.frontier.Close()
-// 	return ctx.Err()
-// }
-
+// cancelled. It returns ctx.Err() if the crawl was cut short, and an error if
+// no seed could be queued.
 func (c *Crawler) Run(ctx context.Context, seeds []string) error {
-	c.logger.Info("crawl started", "seeds", len(seeds), "workers", c.workers)
+	c.logger.Info("crawl started", "seeds", len(seeds), "workers", c.workers,
+		"max_depth", c.maxDepth, "max_pages", c.maxPages, "allowed_hosts", len(c.allowedHosts))
 	for i := 0; i < c.workers; i++ {
 		go c.worker(ctx, i)
 	}
+
+	queued := 0
 	for _, seed := range seeds {
-		c.enqueue(seed)
+		if c.enqueue(seed, 0) {
+			queued++
+		}
 	}
 	c.wg.Wait() // after a cancel this still reaches zero: workers drain the queue
 	c.frontier.Close()
@@ -117,7 +158,12 @@ func (c *Crawler) Run(ctx context.Context, seeds []string) error {
 	s := c.Stats()
 	c.logger.Info("crawl finished",
 		"interrupted", ctx.Err() != nil,
-		"seen", s.Seen, "indexed", s.Indexed, "failed", s.Failed, "disallowed", s.Disallowed)
+		"seen", s.Seen, "indexed", s.Indexed, "failed", s.Failed,
+		"disallowed", s.Disallowed, "out_of_scope", s.OutOfScope)
+
+	if queued == 0 {
+		return errors.New("no seed URL was queued: check the seeds and -allowed-hosts")
+	}
 	return ctx.Err()
 }
 

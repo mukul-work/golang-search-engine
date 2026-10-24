@@ -47,12 +47,12 @@ func (c *Crawler) fetchUrl(ctx context.Context, log *slog.Logger, url string) ([
 }
 
 func (c *Crawler) worker(ctx context.Context, num int) {
-	for url := range c.frontier.out {
-		c.process(ctx, num, url)
+	for task := range c.frontier.out {
+		c.process(ctx, num, task)
 	}
 }
 
-func (c *Crawler) process(ctx context.Context, workerNum int, url string) {
+func (c *Crawler) process(ctx context.Context, workerNum int, task Task) {
 	defer c.wg.Done() // exactly one Done per dequeued URL, on every return path
 
 	// After a cancel, workers keep receiving only to drain the queue. Skip the work.
@@ -60,7 +60,8 @@ func (c *Crawler) process(ctx context.Context, workerNum int, url string) {
 		return
 	}
 
-	log := c.logger.With("worker", workerNum, "url", url)
+	url := task.URL
+	log := c.logger.With("worker", workerNum, "url", url, "depth", task.Depth)
 
 	allowed, err := c.robots.Allowed(ctx, url)
 	if err != nil {
@@ -104,7 +105,7 @@ func (c *Crawler) process(ctx context.Context, workerNum int, url string) {
 
 	newLinks := 0
 	for _, link := range links {
-		if c.enqueue(link) {
+		if c.enqueue(link, task.Depth+1) {
 			newLinks++
 		}
 	}
