@@ -22,7 +22,10 @@ type Config struct {
 	MaxPageBytes   int64
 	HostInterval   time.Duration // minimum gap between requests to one host; 0 = no limit
 	LogLevel       slog.Level
-	LogFormat      string // "text" or "json"
+	LogFormat      string   // "text" or "json"
+	MaxDepth       int      // link hops to follow from a seed; seeds are depth 0
+	MaxPages       int      // most distinct URLs the crawl will queue, seeds included
+	AllowedHosts   []string // empty = any host; an entry also allows its subdomains
 }
 
 // DatabaseURL has no default: it must be provided.
@@ -39,6 +42,8 @@ func Default() Config {
 		HostInterval:   time.Second,
 		LogLevel:       slog.LevelInfo,
 		LogFormat:      "text",
+		MaxDepth:       2,
+		MaxPages:       500,
 	}
 }
 
@@ -88,6 +93,23 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if v := getenv("CRAWLER_SEEDS"); v != "" {
 		cfg.Seeds = splitList(v)
 	}
+	if v := getenv("CRAWLER_MAX_DEPTH"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("CRAWLER_MAX_DEPTH: %w", err)
+		}
+		cfg.MaxDepth = n
+	}
+	if v := getenv("CRAWLER_MAX_PAGES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return Config{}, fmt.Errorf("CRAWLER_MAX_PAGES: %w", err)
+		}
+		cfg.MaxPages = n
+	}
+	if v := getenv("CRAWLER_ALLOWED_HOSTS"); v != "" {
+		cfg.AllowedHosts = splitHosts(v)
+	}
 
 	if v := getenv("LOG_LEVEL"); v != "" {
 		if err := cfg.LogLevel.UnmarshalText([]byte(v)); err != nil {
@@ -109,6 +131,12 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.Int64Var(&cfg.MaxPageBytes, "max-page-bytes", cfg.MaxPageBytes, "maximum bytes read per page")
 	fs.TextVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn or error")
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: text or json")
+	fs.IntVar(&cfg.MaxDepth, "max-depth", cfg.MaxDepth, "link hops to follow from a seed (0 = seeds only)")
+	fs.IntVar(&cfg.MaxPages, "max-pages", cfg.MaxPages, "maximum number of distinct URLs to queue")
+	fs.Func("allowed-hosts", "comma-separated hosts to stay on, subdomains included (empty = any host)", func(v string) error {
+		cfg.AllowedHosts = splitHosts(v)
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		return Config{}, err
 	}
@@ -143,6 +171,18 @@ func (c Config) validate() error {
 	if c.LogFormat != "text" && c.LogFormat != "json" {
 		errs = append(errs, fmt.Errorf("log format must be text or json, got %q", c.LogFormat))
 	}
+
+	if c.MaxDepth < 0 {
+		errs = append(errs, fmt.Errorf("max depth must not be negative, got %d", c.MaxDepth))
+	}
+	if c.MaxPages < 1 {
+		errs = append(errs, fmt.Errorf("max pages must be at least 1, got %d", c.MaxPages))
+	}
+	for _, h := range c.AllowedHosts {
+		if strings.ContainsAny(h, "/: \t") {
+			errs = append(errs, fmt.Errorf("invalid allowed host %q (use a bare hostname like example.com)", h))
+		}
+	}
 	for _, s := range c.Seeds {
 		u, err := url.Parse(s)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -160,4 +200,11 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+func splitHosts(s string) []string {
+	hosts := splitList(s)
+	for i, h := range hosts {
+		hosts[i] = strings.ToLower(h)
+	}
+	return hosts
 }
