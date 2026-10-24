@@ -177,3 +177,59 @@ func TestLoad_EmptyAllowedHostsFlagClearsEnv(t *testing.T) {
 		t.Errorf("AllowedHosts = %v, want none", cfg.AllowedHosts)
 	}
 }
+
+func TestLoadServer_Defaults(t *testing.T) {
+	cfg, err := LoadServer(nil, env(map[string]string{"DB_URL": dbURL}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := DefaultServer()
+	want.DatabaseURL = dbURL
+	if !reflect.DeepEqual(cfg, want) {
+		t.Errorf("got %+v, want %+v", cfg, want)
+	}
+}
+
+func TestLoadServer_EnvThenFlags(t *testing.T) {
+	cfg, err := LoadServer(
+		[]string{"-addr=:9090"},
+		env(map[string]string{
+			"DB_URL": dbURL, "HTTP_ADDR": "127.0.0.1:7000", "LOG_LEVEL": "debug", "LOG_FORMAT": "JSON",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Addr != ":9090" {
+		t.Errorf("Addr = %q, want :9090 (flag beats env)", cfg.Addr)
+	}
+	if cfg.LogLevel != slog.LevelDebug {
+		t.Errorf("LogLevel = %v, want debug (from env)", cfg.LogLevel)
+	}
+	if cfg.LogFormat != "json" {
+		t.Errorf("LogFormat = %q, want json (lowercased)", cfg.LogFormat)
+	}
+}
+
+func TestLoadServer_Errors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+	}{
+		{"missing DB_URL", nil, nil},
+		{"address without a port", []string{"-addr=localhost"}, map[string]string{"DB_URL": dbURL}},
+		{"address is not an address", []string{"-addr=nonsense"}, map[string]string{"DB_URL": dbURL}},
+		{"port out of range", []string{"-addr=:70000"}, map[string]string{"DB_URL": dbURL}},
+		{"port zero", []string{"-addr=:0"}, map[string]string{"DB_URL": dbURL}},
+		{"bad log level", nil, map[string]string{"DB_URL": dbURL, "LOG_LEVEL": "loud"}},
+		{"bad log format", []string{"-log-format=xml"}, map[string]string{"DB_URL": dbURL}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadServer(tc.args, env(tc.env)); err == nil {
+				t.Error("expected an error, got nil")
+			}
+		})
+	}
+}
