@@ -26,16 +26,17 @@ type Config struct {
 	MaxDepth       int      // link hops to follow from a seed; seeds are depth 0
 	MaxPages       int      // most distinct URLs the crawl will queue, seeds included
 	AllowedHosts   []string // empty = any host; an entry also allows its subdomains
+	SeedsFile      string   // optional file of seed URLs; replaces Seeds when set
 }
 
 // DatabaseURL has no default: it must be provided.
 func Default() Config {
 	return Config{
-		Seeds: []string{ // temporary: seeds will move to a file or the database later
-			"https://example.com",
-			"https://scrapfly.io/blog/posts/best-websites-to-practice-web-scraping",
-			"https://www.searchenginejournal.com/alternative-search-engines/271409/",
-		},
+		// Seeds: []string{ // temporary: seeds will move to a file or the database later
+		// 	"https://example.com",
+		// 	"https://scrapfly.io/blog/posts/best-websites-to-practice-web-scraping",
+		// 	"https://www.searchenginejournal.com/alternative-search-engines/271409/",
+		// },
 		Workers:        10,
 		RequestTimeout: 10 * time.Second,
 		MaxPageBytes:   5 << 20,
@@ -110,6 +111,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if v := getenv("CRAWLER_ALLOWED_HOSTS"); v != "" {
 		cfg.AllowedHosts = splitHosts(v)
 	}
+	if v := getenv("CRAWLER_SEEDS_FILE"); v != "" {
+		cfg.SeedsFile = v
+	}
 
 	if v := getenv("LOG_LEVEL"); v != "" {
 		if err := cfg.LogLevel.UnmarshalText([]byte(v)); err != nil {
@@ -133,7 +137,8 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: text or json")
 	fs.IntVar(&cfg.MaxDepth, "max-depth", cfg.MaxDepth, "link hops to follow from a seed (0 = seeds only)")
 	fs.IntVar(&cfg.MaxPages, "max-pages", cfg.MaxPages, "maximum number of distinct URLs to queue")
-	fs.Func("allowed-hosts", "comma-separated hosts to stay on, subdomains included (empty = any host)", func(v string) error {
+	fs.StringVar(&cfg.SeedsFile, "seeds-file", cfg.SeedsFile, "file of seed URLs, one per line, # comments; replaces -seeds")
+	fs.Func("allowed-hosts", "comma-separated hosts to stay on, subdomains included (empty = the hosts of the seeds; * = any host)", func(v string) error {
 		cfg.AllowedHosts = splitHosts(v)
 		return nil
 	})
@@ -141,6 +146,13 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.Seeds = splitList(seeds)
+	if cfg.SeedsFile != "" {
+		fromFile, err := ReadSeedsFile(cfg.SeedsFile)
+		if err != nil {
+			return Config{}, fmt.Errorf("seeds file: %w", err)
+		}
+		cfg.Seeds = fromFile
+	}
 	cfg.LogFormat = strings.ToLower(cfg.LogFormat)
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -166,7 +178,7 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf("host interval must not be negative, got %v", c.HostInterval))
 	}
 	if len(c.Seeds) == 0 {
-		errs = append(errs, errors.New("at least one seed URL is required"))
+		errs = append(errs, errors.New("no seed URLs: set -seeds, -seeds-file, CRAWLER_SEEDS or CRAWLER_SEEDS_FILE"))
 	}
 	if c.LogFormat != "text" && c.LogFormat != "json" {
 		errs = append(errs, fmt.Errorf("log format must be text or json, got %q", c.LogFormat))
