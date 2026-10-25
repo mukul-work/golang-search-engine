@@ -198,3 +198,36 @@ func TestMigrations_BaselineAdoptsExistingSchema(t *testing.T) {
 		t.Errorf("pages has %d rows after Up, want the 1 we inserted", n)
 	}
 }
+
+func TestMigrations_IndexesAfterUp(t *testing.T) {
+	dsn, schema := newTestSchema(t)
+	check := openSQL(t, dsn)
+	m := newTestMigrator(t, dsn)
+	if _, err := m.Up(context.Background()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	rows, err := check.Query(
+		`SELECT indexname FROM pg_indexes WHERE schemaname = $1 AND tablename = 'inverted_index'`, schema)
+	if err != nil {
+		t.Fatalf("listing indexes: %v", err)
+	}
+	defer rows.Close()
+	have := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		have[name] = true
+	}
+
+	for _, want := range []string{"inverted_index_pkey", "idx_inverted_index_page_id"} {
+		if !have[want] {
+			t.Errorf("index %s is missing; have %v", want, have)
+		}
+	}
+	if have["idx_inverted_index_word"] {
+		t.Error("idx_inverted_index_word should have been dropped: the primary key already covers word lookups")
+	}
+}
