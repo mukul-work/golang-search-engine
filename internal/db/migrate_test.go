@@ -221,6 +221,9 @@ func TestMigrations_IndexesAfterUp(t *testing.T) {
 		}
 		have[name] = true
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterating indexes: %v", err)
+	}
 
 	for _, want := range []string{"inverted_index_pkey", "idx_inverted_index_page_id"} {
 		if !have[want] {
