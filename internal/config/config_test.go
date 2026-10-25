@@ -2,14 +2,27 @@ package config
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 )
 
 // env turns a map into the getenv function Load expects.
+// env turns a map into the getenv function Load expects. CRAWLER_SEEDS is
+// filled in with a valid seed unless the test sets it (even to ""), because
+// there are no built-in seeds and every valid config needs one.
 func env(kv map[string]string) func(string) string {
-	return func(key string) string { return kv[key] }
+	return func(key string) string {
+		if v, ok := kv[key]; ok {
+			return v
+		}
+		if key == "CRAWLER_SEEDS" {
+			return "https://seed.test/"
+		}
+		return ""
+	}
 }
 
 const dbURL = "postgres://user:pw@localhost/db"
@@ -21,6 +34,7 @@ func TestLoad_Defaults(t *testing.T) {
 	}
 	want := Default()
 	want.DatabaseURL = dbURL
+	want.Seeds = []string{"https://seed.test/"} // supplied by the env helper
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("got %+v, want %+v", cfg, want)
 	}
@@ -228,6 +242,75 @@ func TestLoadServer_Errors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := LoadServer(tc.args, env(tc.env)); err == nil {
+				t.Error("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func writeSeeds(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "seeds.txt")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing seeds file: %v", err)
+	}
+	return path
+}
+
+func TestReadSeedsFile(t *testing.T) {
+	path := writeSeeds(t, "\ufeff# my corpus\n\nhttps://a.test/\r\n  https://b.test/page#intro  \n# https://skipped.test/\n")
+
+	got, err := ReadSeedsFile(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Comments, blank lines, the BOM and Windows line endings are handled,
+	// and the # inside a URL is kept.
+	want := []string{"https://a.test/", "https://b.test/page#intro"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v, want %v", got, want)
+	}
+}
+
+func TestLoad_SeedsFileReplacesOtherSeeds(t *testing.T) {
+	path := writeSeeds(t, "https://file.test/\n")
+	cfg, err := Load(
+		[]string{"-seeds-file=" + path, "-seeds=https://flag.test/"},
+		env(map[string]string{"DB_URL": dbURL, "CRAWLER_SEEDS": "https://env.test/"}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := []string{"https://file.test/"}; !reflect.DeepEqual(cfg.Seeds, want) {
+		t.Errorf("Seeds = %v, want %v (the file wins)", cfg.Seeds, want)
+	}
+}
+
+func TestLoad_SeedsFileFromEnv(t *testing.T) {
+	path := writeSeeds(t, "https://file.test/\n")
+	cfg, err := Load(nil, env(map[string]string{"DB_URL": dbURL, "CRAWLER_SEEDS_FILE": path}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if want := []string{"https://file.test/"}; !reflect.DeepEqual(cfg.Seeds, want) {
+		t.Errorf("Seeds = %v, want %v", cfg.Seeds, want)
+	}
+}
+
+func TestLoad_SeedsErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+	}{
+		{"no seeds anywhere", nil, map[string]string{"DB_URL": dbURL, "CRAWLER_SEEDS": ""}},
+		{"seeds file does not exist", []string{"-seeds-file=/nonexistent/seeds.txt"}, map[string]string{"DB_URL": dbURL}},
+		{"seeds file has only comments", []string{"-seeds-file=" + writeSeeds(t, "# nothing here\n\n")}, map[string]string{"DB_URL": dbURL}},
+		{"seeds file has a bad URL", []string{"-seeds-file=" + writeSeeds(t, "ftp://nope.test/\n")}, map[string]string{"DB_URL": dbURL}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := Load(tc.args, env(tc.env)); err == nil {
 				t.Error("expected an error, got nil")
 			}
 		})

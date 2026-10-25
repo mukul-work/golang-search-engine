@@ -422,3 +422,36 @@ func TestRun_ErrorsWhenNoSeedIsInScope(t *testing.T) {
 		t.Fatal("Run did not return")
 	}
 }
+
+func TestEnqueue_StarAllowsAnyHost(t *testing.T) {
+	opts := testOptions()
+	opts.AllowedHosts = []string{"*"}
+	c := New(nil, discardLogger(), opts)
+
+	if !c.enqueue("https://anything.test/x", 0) {
+		t.Error(`with "*" any host should be accepted`)
+	}
+}
+
+func TestRun_StaysOnSeedHostsByDefault(t *testing.T) {
+	srv := newRobotsServer(t)
+	home, a := srv.URL+"/", srv.URL+"/a"
+
+	idx := &fakeIndexer{}
+	c := New(idx, discardLogger(), testOptions()) // no AllowedHosts: derived from the seed
+	c.fetcher = &fakeFetcher{pages: map[string]string{
+		home: `<html><body><a href="/a">a</a><a href="https://other.test/x">elsewhere</a></body></html>`,
+		a:    `<html><body>second page</body></html>`,
+	}}
+
+	runWithTimeout(t, c, []string{home})
+
+	sort.Strings(idx.urls)
+	if want := []string{home, a}; !reflect.DeepEqual(idx.urls, want) {
+		t.Errorf("indexed %v, want %v", idx.urls, want)
+	}
+	// The off-site link must be dropped before it is queued.
+	if s := c.Stats(); s.Seen != 2 || s.OutOfScope != 1 || s.Failed != 0 {
+		t.Errorf("stats = %+v, want seen=2 out_of_scope=1 failed=0", s)
+	}
+}

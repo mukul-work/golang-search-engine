@@ -28,7 +28,7 @@ type Options struct {
 	HostInterval   time.Duration
 	MaxDepth       int      // link hops to follow from a seed; seeds are depth 0
 	MaxPages       int      // most distinct URLs to queue, seeds included; <= 0 means no budget
-	AllowedHosts   []string // empty means any host; an entry also allows its subdomains
+	AllowedHosts   []string // empty means the hosts of the seeds; "*" means any host; an entry also allows its subdomains
 }
 
 // Crawler owns everything a crawl needs. A Crawler runs once: Run closes
@@ -140,8 +140,13 @@ func (c *Crawler) enqueue(raw string, depth int) bool {
 // cancelled. It returns ctx.Err() if the crawl was cut short, and an error if
 // no seed could be queued.
 func (c *Crawler) Run(ctx context.Context, seeds []string) error {
+	if len(c.allowedHosts) == 0 {
+		// Staying on the sites we started from is the safe default; "*" opts out.
+		// This runs before any worker starts, so nothing reads the slice yet.
+		c.allowedHosts = seedHosts(seeds)
+	}
 	c.logger.Info("crawl started", "seeds", len(seeds), "workers", c.workers,
-		"max_depth", c.maxDepth, "max_pages", c.maxPages, "allowed_hosts", len(c.allowedHosts))
+		"max_depth", c.maxDepth, "max_pages", c.maxPages, "allowed_hosts", c.allowedHosts)
 	for i := 0; i < c.workers; i++ {
 		go c.worker(ctx, i)
 	}
