@@ -39,7 +39,7 @@ func Default() Config {
 		Workers:        10,
 		RequestTimeout: 10 * time.Second,
 		MaxPageBytes:   5 << 20,
-		HostInterval:   time.Second,
+		HostInterval:   2 * time.Second,
 		LogLevel:       slog.LevelInfo,
 		LogFormat:      "text",
 		MaxDepth:       2,
