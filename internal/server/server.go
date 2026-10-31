@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -29,16 +30,31 @@ type Server struct {
 	searcher Searcher
 	logger   *slog.Logger
 	handler  http.Handler
+	limiter  *RateLimiter   // nil means no rate limiting
+	trusted  []netip.Prefix // proxies whose X-Forwarded-For is believed
 }
 
-func New(searcher Searcher, logger *slog.Logger) *Server {
+// Option customizes a Server.
+type Option func(*Server)
+
+// WithRateLimit limits requests per client on the search endpoints.
+func WithRateLimit(l *RateLimiter) Option { return func(s *Server) { s.limiter = l } }
+
+// WithTrustedProxies names the reverse proxies whose X-Forwarded-For header
+// may be believed when working out who a client is.
+func WithTrustedProxies(p []netip.Prefix) Option { return func(s *Server) { s.trusted = p } }
+
+func New(searcher Searcher, logger *slog.Logger, opts ...Option) *Server {
 	s := &Server{searcher: searcher, logger: logger}
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.handlePage)
+	mux.HandleFunc("GET /{$}", s.limited(s.denyPage, s.handlePage))
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
 	mux.HandleFunc("GET /healthz", s.handleHealth)
-	mux.HandleFunc("GET /api/search", s.handleSearch)
+	mux.HandleFunc("GET /api/search", s.limited(s.denyAPI, s.handleSearch))
 
 	// secureHeaders is outermost so every response gets the headers, including
 	// 404s and 405s the mux writes itself.
