@@ -6,23 +6,29 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 )
 
 // ServerConfig holds the settings for the web server binary.
 type ServerConfig struct {
-	DatabaseURL string
-	Addr        string // host:port to listen on
-	LogLevel    slog.Level
-	LogFormat   string // "text" or "json"
+	DatabaseURL     string
+	Addr            string // host:port to listen on
+	LogLevel        slog.Level
+	LogFormat       string         // "text" or "json"
+	RateLimitPerMin int            // requests per minute per client; 0 turns limiting off
+	RateBurst       int            // how many requests a client may make in a quick burst
+	TrustedProxies  []netip.Prefix // reverse proxies whose X-Forwarded-For is believed
 }
 
 func DefaultServer() ServerConfig {
 	return ServerConfig{
-		Addr:      "127.0.0.1:8080", // loopback only; deployments set HTTP_ADDR explicitly
-		LogLevel:  slog.LevelInfo,
-		LogFormat: "text",
+		Addr:            "127.0.0.1:8080", // loopback only; deployments set HTTP_ADDR explicitly
+		LogLevel:        slog.LevelInfo,
+		LogFormat:       "text",
+		RateLimitPerMin: 60,
+		RateBurst:       10,
 	}
 }
 
@@ -43,10 +49,42 @@ func LoadServer(args []string, getenv func(string) string) (ServerConfig, error)
 		cfg.LogFormat = v
 	}
 
+	if v := getenv("RATE_LIMIT_PER_MIN"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("RATE_LIMIT_PER_MIN: %w", err)
+		}
+		cfg.RateLimitPerMin = n
+	}
+	if v := getenv("RATE_LIMIT_BURST"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("RATE_LIMIT_BURST: %w", err)
+		}
+		cfg.RateBurst = n
+	}
+	if v := getenv("TRUSTED_PROXIES"); v != "" {
+		p, err := parseProxies(v)
+		if err != nil {
+			return ServerConfig{}, fmt.Errorf("TRUSTED_PROXIES: %w", err)
+		}
+		cfg.TrustedProxies = p
+	}
+
 	flagSet := flag.NewFlagSet("server", flag.ContinueOnError)
 	flagSet.StringVar(&cfg.Addr, "addr", cfg.Addr, "address to listen on, e.g. 127.0.0.1:8080 or :8080")
 	flagSet.TextVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "log level: debug, info, warn or error")
 	flagSet.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log format: text or json")
+	flagSet.IntVar(&cfg.RateLimitPerMin, "rate-limit", cfg.RateLimitPerMin, "requests per minute allowed per client IP (0 = no limit)")
+	flagSet.IntVar(&cfg.RateBurst, "rate-burst", cfg.RateBurst, "requests a client may make in a quick burst")
+	flagSet.Func("trusted-proxies", "comma-separated IPs or CIDRs of reverse proxies whose X-Forwarded-For is believed (default: none)", func(v string) error {
+		p, err := parseProxies(v)
+		if err != nil {
+			return err
+		}
+		cfg.TrustedProxies = p
+		return nil
+	})
 	if err := flagSet.Parse(args); err != nil {
 		return ServerConfig{}, err
 	}
@@ -71,5 +109,33 @@ func (c ServerConfig) validate() error {
 	if c.LogFormat != "text" && c.LogFormat != "json" {
 		errs = append(errs, fmt.Errorf("log format must be text or json, got %q", c.LogFormat))
 	}
+	if c.RateLimitPerMin < 0 {
+		errs = append(errs, fmt.Errorf("rate limit must not be negative, got %d", c.RateLimitPerMin))
+	}
+	if c.RateLimitPerMin > 0 && c.RateBurst < 1 {
+		errs = append(errs, fmt.Errorf("rate burst must be at least 1 when rate limiting is on, got %d", c.RateBurst))
+	}
 	return errors.Join(errs...)
+}
+
+// parseProxies reads a comma-separated list of IP addresses or CIDR ranges.
+func parseProxies(s string) ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, item := range splitList(s) {
+		if strings.Contains(item, "/") {
+			p, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, fmt.Errorf("invalid proxy range %q: %w", item, err)
+			}
+			out = append(out, p.Masked())
+			continue
+		}
+		a, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("invalid proxy address %q: %w", item, err)
+		}
+		a = a.Unmap()
+		out = append(out, netip.PrefixFrom(a, a.BitLen())) // a single address is a /32 or /128
+	}
+	return out, nil
 }

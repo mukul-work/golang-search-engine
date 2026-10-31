@@ -2,6 +2,7 @@ package config
 
 import (
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -311,6 +312,57 @@ func TestLoad_SeedsErrors(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := Load(tc.args, env(tc.env)); err == nil {
+				t.Error("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func TestLoadServer_RateLimitSettings(t *testing.T) {
+	cfg, err := LoadServer(
+		[]string{"-rate-burst=5"},
+		env(map[string]string{"DB_URL": dbURL, "RATE_LIMIT_PER_MIN": "30", "RATE_LIMIT_BURST": "20", "TRUSTED_PROXIES": "172.16.0.0/12, 10.1.2.3"}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerMin != 30 {
+		t.Errorf("RateLimitPerMin = %d, want 30 (from env)", cfg.RateLimitPerMin)
+	}
+	if cfg.RateBurst != 5 {
+		t.Errorf("RateBurst = %d, want 5 (the flag beats env)", cfg.RateBurst)
+	}
+	want := []netip.Prefix{netip.MustParsePrefix("172.16.0.0/12"), netip.MustParsePrefix("10.1.2.3/32")}
+	if !reflect.DeepEqual(cfg.TrustedProxies, want) {
+		t.Errorf("TrustedProxies = %v, want %v", cfg.TrustedProxies, want)
+	}
+}
+
+func TestLoadServer_RateLimitCanBeTurnedOff(t *testing.T) {
+	cfg, err := LoadServer([]string{"-rate-limit=0", "-rate-burst=0"}, env(map[string]string{"DB_URL": dbURL}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.RateLimitPerMin != 0 {
+		t.Errorf("RateLimitPerMin = %d, want 0 (off)", cfg.RateLimitPerMin)
+	}
+}
+
+func TestLoadServer_RateLimitErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		env  map[string]string
+	}{
+		{"negative rate", []string{"-rate-limit=-1"}, map[string]string{"DB_URL": dbURL}},
+		{"zero burst while limiting is on", []string{"-rate-burst=0"}, map[string]string{"DB_URL": dbURL}},
+		{"rate is not a number", nil, map[string]string{"DB_URL": dbURL, "RATE_LIMIT_PER_MIN": "many"}},
+		{"bad proxy address", []string{"-trusted-proxies=not-an-ip"}, map[string]string{"DB_URL": dbURL}},
+		{"bad proxy range", nil, map[string]string{"DB_URL": dbURL, "TRUSTED_PROXIES": "10.0.0.0/99"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := LoadServer(tc.args, env(tc.env)); err == nil {
 				t.Error("expected an error, got nil")
 			}
 		})
