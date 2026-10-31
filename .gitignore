@@ -33,3 +33,4 @@ go.work.sum
 # .vscode/
 *.dump
 backup*.sql
+crawl.log
