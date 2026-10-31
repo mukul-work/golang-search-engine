@@ -455,3 +455,35 @@ func TestRun_StaysOnSeedHostsByDefault(t *testing.T) {
 		t.Errorf("stats = %+v, want seen=2 out_of_scope=1 failed=0", s)
 	}
 }
+
+func TestRun_CancelDuringCooldownStillFinishes(t *testing.T) {
+	srv := newRobotsServer(t)
+	opts := testOptions()
+	opts.HostInterval = time.Hour // after the first URL, the host is closed for an hour
+	c := New(&fakeIndexer{}, discardLogger(), opts)
+	bf := &blockingFetcher{started: make(chan struct{}, 1)}
+	c.fetcher = bf
+
+	seeds := []string{srv.URL + "/1", srv.URL + "/2", srv.URL + "/3"} // one host
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errc := make(chan error, 1)
+	go func() { errc <- c.Run(ctx, seeds) }()
+
+	select {
+	case <-bf.started: // one fetch is in flight; the other two wait out their cooldown
+	case <-time.After(5 * time.Second):
+		t.Fatal("no fetch ever started")
+	}
+	cancel()
+
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Run returned %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not return: URLs waiting out their cooldown were never released")
+	}
+}

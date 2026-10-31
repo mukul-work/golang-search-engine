@@ -77,18 +77,6 @@ func (c *Crawler) process(ctx context.Context, workerNum int, task Task) {
 		return
 	}
 
-	waited, err := c.limiter.Wait(ctx, url)
-	if err != nil {
-		if ctx.Err() == nil {
-			c.failed.Add(1)
-			log.Warn("rate limiter failed", "err", err)
-		}
-		return
-	}
-	if waited > 10*time.Millisecond {
-		log.Debug("waited for rate limit", "waited", waited)
-	}
-
 	start := time.Now()
 	links, err := c.fetchUrl(ctx, log, url)
 	if err != nil {

@@ -37,7 +37,6 @@ type Crawler struct {
 	frontier *Frontier
 	visited  *VisitedSet
 	robots   *RobotCache
-	limiter  *HostLimiter
 	fetcher  Fetcher
 	store    PageIndexer
 	logger   *slog.Logger
@@ -66,10 +65,9 @@ func New(store PageIndexer, logger *slog.Logger, opts Options) *Crawler {
 	}
 
 	return &Crawler{
-		frontier:     NewFrontier(),
+		frontier:     NewFrontier(opts.HostInterval),
 		visited:      NewVisitedSet(opts.MaxPages),
 		robots:       NewRobotCache(client),
-		limiter:      NewHostLimiter(opts.HostInterval),
 		fetcher:      NewHTTPFetcher(client, opts.MaxPageBytes),
 		store:        store,
 		logger:       logger,
@@ -145,8 +143,12 @@ func (c *Crawler) Run(ctx context.Context, seeds []string) error {
 		// This runs before any worker starts, so nothing reads the slice yet.
 		c.allowedHosts = seedHosts(seeds)
 	}
-	c.logger.Info("crawl started", "seeds", len(seeds), "workers", c.workers,
-		"max_depth", c.maxDepth, "max_pages", c.maxPages, "allowed_hosts", c.allowedHosts)
+	c.logger.Info("crawl started", "seeds", len(seeds), "workers", c.workers, "max_depth", c.maxDepth, "max_pages", c.maxPages, "allowed_hosts", c.allowedHosts)
+
+	// On cancel, release URLs that are waiting out a cooldown so workers can
+	// take them, skip them, and let the WaitGroup reach zero.
+	stop := context.AfterFunc(ctx, c.frontier.Drain)
+	defer stop()
 	for i := 0; i < c.workers; i++ {
 		go c.worker(ctx, i)
 	}

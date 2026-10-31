@@ -7,7 +7,6 @@ require (
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/temoto/robotstxt v1.1.2
 	golang.org/x/net v0.61.0
-	golang.org/x/time v0.16.0
 )
 
 require (

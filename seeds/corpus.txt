@@ -1,2 +1,6 @@
-https://go.dev/blog/
+https://gobyexample.com/
 https://research.swtch.com/
+https://eli.thegreenplace.net/
+https://brandur.org/
+https://jvns.ca/
+https://lethain.com/
