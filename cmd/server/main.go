@@ -49,7 +49,15 @@ func run() error {
 	}
 	defer store.Close() // runs after Shutdown has drained in-flight requests
 
-	app := server.New(search.NewService(store), logger)
+	var opts []server.Option
+	if cfg.RateLimitPerMin > 0 {
+		opts = append(opts, server.WithRateLimit(server.NewRateLimiter(cfg.RateLimitPerMin, cfg.RateBurst)))
+	}
+	if len(cfg.TrustedProxies) > 0 {
+		opts = append(opts, server.WithTrustedProxies(cfg.TrustedProxies))
+	}
+	logger.Info("rate limit", "per_minute", cfg.RateLimitPerMin, "burst", cfg.RateBurst, "trusted_proxies", cfg.TrustedProxies)
+	app := server.New(search.NewService(store), logger, opts...)
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           app.Handler(),
