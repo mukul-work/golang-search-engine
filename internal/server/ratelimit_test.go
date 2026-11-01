@@ -88,21 +88,21 @@ func TestRateLimiter_ClockGoingBackwardsEarnsNothing(t *testing.T) {
 }
 
 func TestRateLimiter_SweepForgetsIdleClientsButKeepsActiveOnes(t *testing.T) {
-	l := NewRateLimiter(6, 2) // 0.1 token per second: an empty bucket takes 20s to refill
+	l := NewRateLimiter(1, 2) // one token per minute, bucket holds 2
 	for i := 0; i < 100; i++ {
-		l.Allow(fmt.Sprintf("ip-%d", i), rlBase) // each spends a token, so none is full
+		l.Allow(fmt.Sprintf("idle-%d", i), rlBase) // each spends 1 token: 1 left, so refilled to full after 60s
 	}
-	if got := l.size(); got != 100 {
-		t.Fatalf("size = %d, want 100", got)
+	l.Allow("busy", rlBase)
+	l.Allow("busy", rlBase) // spends both tokens: 0 left, needs 120s to refill
+	if got := l.size(); got != 101 {
+		t.Fatalf("size = %d, want 101", got)
 	}
 
-	// "busy" empties its bucket half a second before the sweep.
-	l.Allow("busy", rlBase.Add(119*time.Second+500*time.Millisecond))
-	l.Allow("busy", rlBase.Add(119*time.Second+500*time.Millisecond))
-
-	l.Allow("fresh", rlBase.Add(2*time.Minute)) // the sweep runs first
+	// 90s later the sweep is due: idle clients are full again (forgotten),
+	// busy has only 1.5 tokens back (kept).
+	l.Allow("fresh", rlBase.Add(90*time.Second))
 	if got := l.size(); got != 2 {
-		t.Errorf("size = %d, want 2: the 100 idle clients forgotten, busy and fresh kept", got)
+		t.Errorf("size = %d, want 2 (busy and fresh)", got)
 	}
 }
 
